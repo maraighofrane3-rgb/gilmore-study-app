@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { Clock, ListChecks, ArrowRight, Target, Flame, Trophy } from 'lucide-react';
 import DailyCoach from '../components/DailyCoach';
-import MonthlyStudySeries from '../components/Monthlystudyseries'; // ✅ Fix 1 : casse correcte
+import MonthlyStudySeries from '../components/MonthlyStudySeries'; // ✅ Fix 1 : casse correcte
 
 function getGreeting() {
   const hour = new Date().getHours();
