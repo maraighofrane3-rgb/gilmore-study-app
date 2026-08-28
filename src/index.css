@@ -1,0 +1,140 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&family=Special+Elite&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ✅ Global font size boost (16px → 17px) */
+  html {
+    font-size: 17px;
+  }
+
+  /* ☀️ PAPER — Stars Hollow, autumn afternoon */
+  :root,
+  [data-theme="paper"] {
+    --color-page-cream: #F3EAD8;
+    --color-parchment: #EAE0CB;
+    --color-library-ink: #1E1814;      /* darker main text */
+    --color-yale-blue: #10233B;
+    --color-maple-rust: #8F3322;
+    --color-coffee-cream: #6B543C;     /* darker muted text */
+    --color-gilmore-gold: #A98716;
+    --color-porch-sage: #5F6B4E;
+
+    /* Sidebar: classic Yale navy — Rory's motif. Dark enough that its
+       own text stays independently legible, whatever the content theme does. */
+    --color-sidebar-bg: #14263D;
+    --color-sidebar-text: #F5EDDD;
+    --color-sidebar-muted: #B9C9C0;    /* soft sage-blue-gray */
+    --color-sidebar-accent: #D9B44A;   /* warm gold */
+  }
+
+  /* 🌙 MIDNIGHT — reading under the covers with a flashlight */
+  [data-theme="midnight"] {
+    --color-page-cream: #141824;        /* deeper night */
+    --color-parchment: #1E2538;
+    --color-library-ink: #F0E8D6;      /* lighter main text */
+    --color-yale-blue: #8CA8C4;        /* true moonlit blue (not cream!) */
+    --color-maple-rust: #D97F56;
+    --color-coffee-cream: #BDB6A3;     /* lighter muted text */
+    --color-gilmore-gold: #E8C26A;     /* warmer, richer gold */
+    --color-porch-sage: #7EA890;
+
+    /* Sidebar: deep moonlit indigo — cooler and more saturated than Paper's
+       navy, distinct hue, still dark enough for strong text contrast. */
+    --color-sidebar-bg: #121A33;
+    --color-sidebar-text: #F0E8D6;
+    --color-sidebar-muted: #9FB4D9;    /* soft periwinkle, moonlit feel */
+    --color-sidebar-accent: #E8C26A;
+  }
+
+  /* 📚 LIBRARY — green banker's lamp, leather armchairs */
+  [data-theme="library"] {
+    --color-page-cream: #14201A;        /* deeper forest */
+    --color-parchment: #1D2D25;
+    --color-library-ink: #EEE4CE;      /* lighter main text */
+    --color-yale-blue: #9DB8A8;        /* true sage-forest green (not cream!) */
+    --color-maple-rust: #C47A4A;
+    --color-coffee-cream: #A8BBA9;     /* lighter muted text */
+    --color-gilmore-gold: #D4B04A;
+    --color-porch-sage: #6F9477;
+
+    /* Sidebar: dark hunter-green leather armchair — earthy, distinct from
+       Paper's blue and Midnight's indigo, still dark enough for contrast. */
+    --color-sidebar-bg: #17261C;
+    --color-sidebar-text: #EFE6CB;
+    --color-sidebar-muted: #A9C7A0;    /* sage, lighter than the bg's green */
+    --color-sidebar-accent: #E0BE5C;   /* banker's-lamp brass */
+  }
+
+  /* ☀️ CREAM — sunny morning at the diner counter */
+  [data-theme="cream"] {
+    --color-page-cream: #FBF6EC;
+    --color-parchment: #F3ECDD;
+    --color-library-ink: #2B241B;      /* darker main text */
+    --color-yale-blue: #2A4A5E;
+    --color-maple-rust: #A34A2E;
+    --color-coffee-cream: #7A6649;     /* darker muted text */
+    --color-gilmore-gold: #B08F35;
+    --color-porch-sage: #6E7D5F;
+
+    /* Sidebar: warm dark coffee-wood brown — the diner counter itself.
+       Fourth distinct hue, dark enough to keep cream text crisp. */
+    --color-sidebar-bg: #3A2418;
+    --color-sidebar-text: #FBF3E4;
+    --color-sidebar-muted: #D9B98A;    /* warm caramel-tan */
+    --color-sidebar-accent: #E8A23D;   /* amber, like the diner's neon sign */
+  }
+
+  body {
+    @apply bg-page-cream text-library-ink font-body antialiased transition-colors duration-500;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E");
+    background-blend-mode: multiply;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display font-semibold text-yale-blue;
+  }
+
+  ::selection {
+    background-color: var(--color-gilmore-gold);
+    opacity: 0.4;
+    color: var(--color-library-ink);
+  }
+}
+
+@layer components {
+  .eyebrow {
+    @apply font-label text-xs uppercase tracking-wider text-maple-rust;
+  }
+
+  .link-underline {
+    @apply underline decoration-porch-sage decoration-2 underline-offset-4 hover:decoration-maple-rust transition-colors;
+  }
+
+  .cozy-card {
+    @apply bg-parchment border border-coffee-cream rounded-sm shadow-cozy transition-transform duration-300;
+  }
+
+  .cozy-card:hover {
+    @apply -translate-y-1;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up,
+  .animate-leaf-fall {
+    animation: none !important;
+  }
+}

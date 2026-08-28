@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Lora:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+    
+    <title>Rory Gilmore's World</title>
+    
+    <style>
+      /* Custom leaf animations */
+      @keyframes leafFloat1 {
+        0%, 100% {
+          transform: translateY(0) translateX(0) rotate(0deg);
+          opacity: 0.4;
+        }
+        33% {
+          transform: translateY(-20px) translateX(15px) rotate(120deg);
+          opacity: 0.6;
+        }
+        66% {
+          transform: translateY(10px) translateX(-10px) rotate(240deg);
+          opacity: 0.3;
+        }
+      }
+      
+      @keyframes leafFloat2 {
+        0%, 100% {
+          transform: translateY(0) translateX(0) rotate(0deg);
+          opacity: 0.3;
+        }
+        33% {
+          transform: translateY(15px) translateX(-20px) rotate(-120deg);
+          opacity: 0.5;
+        }
+        66% {
+          transform: translateY(-15px) translateX(10px) rotate(-240deg);
+          opacity: 0.4;
+        }
+      }
+      
+      @keyframes leafFloat3 {
+        0%, 100% {
+          transform: translateY(0) translateX(0) rotate(0deg);
+          opacity: 0.35;
+        }
+        50% {
+          transform: translateY(-25px) translateX(5px) rotate(180deg);
+          opacity: 0.55;
+        }
+      }
+
+      .leaf {
+        position: fixed;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .leaf-1 {
+        top: 10%;
+        left: 5%;
+        width: 40px;
+        height: 40px;
+        animation: leafFloat1 15s ease-in-out infinite;
+      }
+
+      .leaf-2 {
+        top: 60%;
+        right: 8%;
+        width: 35px;
+        height: 35px;
+        animation: leafFloat2 18s ease-in-out infinite;
+        animation-delay: -5s;
+      }
+
+      .leaf-3 {
+        bottom: 15%;
+        left: 12%;
+        width: 30px;
+        height: 30px;
+        animation: leafFloat3 20s ease-in-out infinite;
+        animation-delay: -10s;
+      }
+
+      .leaf-4 {
+        top: 40%;
+        right: 15%;
+        width: 25px;
+        height: 25px;
+        animation: leafFloat1 22s ease-in-out infinite;
+        animation-delay: -7s;
+      }
+
+      .leaf-5 {
+        top: 80%;
+        right: 25%;
+        width: 32px;
+        height: 32px;
+        animation: leafFloat2 17s ease-in-out infinite;
+        animation-delay: -12s;
+      }
+
+      .leaf-6 {
+        top: 20%;
+        right: 35%;
+        width: 28px;
+        height: 28px;
+        animation: leafFloat3 19s ease-in-out infinite;
+        animation-delay: -3s;
+      }
+
+      .leaf path {
+        fill: #8B4513;
+        opacity: 0.3;
+      }
+
+      /* Smooth scrolling */
+      html {
+        scroll-behavior: smooth;
+      }
+
+      /* Custom scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: #FAF6F1;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #8B7355;
+        border-radius: 4px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: #8B4513;
+      }
+    </style>
+  </head>
+  <body class="bg-page-cream text-library-ink antialiased">
+    <!-- Floating Leaves Background -->
+    <svg class="leaf leaf-1" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <path d="M50 10 C50 10 60 30 50 50 C40 70 30 90 50 90 C70 90 60 70 50 50 C40 30 50 10 50 10 Z M50 20 C50 20 55 35 50 50 C45 65 40 80 50 80 C60 80 55 65 50 50 C45 35 50 20 50 20 Z"/>
+      <path d="M50 50 Q65 45 75 55" stroke="#8B4513" stroke-width="1" fill="none" opacity="0.4"/>
+      <path d="M50 50 Q35 45 25 55" stroke="#8B4513" stroke-width="1" fill="none" opacity="0.4"/>
+    </svg>
+
+    <svg class="leaf leaf-2" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <path d="M50 10 C50 10 60 30 50 50 C40 70 30 90 50 90 C70 90 60 70 50 50 C40 30 50 10 50 10 Z M50 20 C50 20 55 35 50 50 C45 65 40 80 50 80 C60 80 55 65 50 50 C45 35 50 20 50 20 Z"/>
+      <path d="M50 50 Q65 45 75 55" stroke="#8B4513" stroke-width="1" fill="none" opacity="0.4"/>
+      <path d="M50 50 Q35 45 25 55" stroke="#8B4513" stroke-width="1" fill="none" opacity="0.4"/>
+    </svg>
+
+    <svg class="leaf leaf-3" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <path d="M50 10 C50 10 60 30 50 50 C40 70 30 90 50 90 C70 90 60 70 50 50 C40 30 50 10 50 10 Z M50 20 C50 20 55 35 50 50 C45 65 40 80 50 80 C60 80 55 65 50 50 C45 35 50 20 50 20 Z"/>
+      <path d="M50 50 Q65 45 75 55" stroke="#8B4513" stroke-width="1" fill="none" opacity="0.4"/>
+      <path d="M50 50 Q35 45 25 55" stroke="#8B4513" stroke-width="1" fill="none" opacity="0.4"/>
+    </svg>
+
+    <svg class="leaf leaf-4" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <path d="M50 10 C50 10 60 30 50 50 C40 70 30 90 50 90 C70 90 60 70 50 50 C40 30 50 10 50 10 Z M50 20 C50 20 55 35 50 50 C45 65 40 80 50 80 C60 80 55 65 50 50 C45 35 50 20 50 20 Z"/>
+      <path d="M50 50 Q65 45 75 55" stroke="#8B4513" stroke-width="1" fill="none" opacity="0.4"/>
+      <path d="M50 50 Q35 45 25 55" stroke="#8B4513" stroke-width="1" fill="none" opacity="0.4"/>
+    </svg>
+
+    <svg class="leaf leaf-5" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <path d="M50 10 C50 10 60 30 50 50 C40 70 30 90 50 90 C70 90 60 70 50 50 C40 30 50 10 50 10 Z M50 20 C50 20 55 35 50 50 C45 65 40 80 50 80 C60 80 55 65 50 50 C45 35 50 20 50 20 Z"/>
+      <path d="M50 50 Q65 45 75 55" stroke="#8B4513" stroke-width="1" fill="none" opacity="0.4"/>
+      <path d="M50 50 Q35 45 25 55" stroke="#8B4513" stroke-width="1" fill="none" opacity="0.4"/>
+    </svg>
+
+    <svg class="leaf leaf-6" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <path d="M50 10 C50 10 60 30 50 50 C40 70 30 90 50 90 C70 90 60 70 50 50 C40 30 50 10 50 10 Z M50 20 C50 20 55 35 50 50 C45 65 40 80 50 80 C60 80 55 65 50 50 C45 35 50 20 50 20 Z"/>
+      <path d="M50 50 Q65 45 75 55" stroke="#8B4513" stroke-width="1" fill="none" opacity="0.4"/>
+      <path d="M50 50 Q35 45 25 55" stroke="#8B4513" stroke-width="1" fill="none" opacity="0.4"/>
+    </svg>
+
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
