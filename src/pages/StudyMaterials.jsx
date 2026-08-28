@@ -159,6 +159,7 @@ export default function StudyMaterials() {
       setPdfTitle('');
       
       showNotification(`PDF imported successfully! Extracted ${extractedText.length} characters.`);
+      navigate(`/study-materials/${selectedMaterial.id}/chapters/${data.id}`);
     } catch (err) {
       console.error('PDF upload error:', err);
       showNotification(`Failed to process PDF: ${err.message}`, 'error');
@@ -202,6 +203,7 @@ export default function StudyMaterials() {
       setNewChapter({ title: '', content: '' });
       setShowChapterForm(false);
       showNotification('Chapter added successfully!');
+      navigate(`/study-materials/${selectedMaterial.id}/chapters/${data.id}`);
     } else {
       showNotification('Failed to add chapter.', 'error');
     }
@@ -466,7 +468,7 @@ export default function StudyMaterials() {
                 <p className="text-center text-coffee-cream italic py-4 text-sm">No chapters yet.</p>
               ) : (
                 chapters.map((chapter) => (
-                  <div key={chapter.id} onClick={() => setSelectedChapter(chapter)} className={`p-4 rounded-sm border cursor-pointer transition-all group ${selectedChapter?.id === chapter.id ? 'bg-page-cream border-maple-rust shadow-cozy' : 'bg-parchment border-coffee-cream/20 hover:border-coffee-cream/50'}`}>
+                  <div key={chapter.id} onClick={() =>  navigate(`/study-materials/${selectedMaterial.id}/chapters/${chapter.id}`)} className={`p-4 rounded-sm border cursor-pointer transition-all group ${selectedChapter?.id === chapter.id ? 'bg-page-cream border-maple-rust shadow-cozy' : 'bg-parchment border-coffee-cream/20 hover:border-coffee-cream/50'}`}>
                     <div className="flex justify-between items-start">
                       <div>
                         <div className="flex items-center gap-2">

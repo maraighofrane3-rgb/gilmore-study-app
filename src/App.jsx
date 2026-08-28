@@ -1,5 +1,5 @@
-// TEST123
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { FocusTimerProvider } from './context/FocusTimerContext'; // ✅ named import
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
@@ -17,40 +17,46 @@ import Settings from './pages/Settings';
 import ForgotPassword from './pages/ForgotPassword';
 import Achievements from './pages/Achievements';
 import StudyMaterials from './pages/StudyMaterials';
-
+import ChapterDetail from './pages/ChapterDetail';
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Public Auth Routes */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<Signup />} />
+    // ✅ Le provider enveloppe TOUT le routeur.
+    // (AuthProvider est déjà au-dessus, dans main.jsx → l'ordre est respecté)
+    <FocusTimerProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* Public Auth Routes */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
 
-        {/* Protected App Routes */}
-        <Route path="/" element={
-          <ProtectedRoute>
-            <Layout />
-          </ProtectedRoute>
-        }>
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="library" element={<Library />} /> 
-          <Route path="tasks" element={<Tasks />} />
-          <Route path="focus" element={<Focus />} />          
-          <Route path="goals" element={<Goals />} />          
-          <Route path="notebook" element={<Notebook />} />  
-          <Route path="profile" element={<Profile />} />
-          <Route path="rabbit-holes" element={<RabbitHoles />} />
-          <Route path="projects" element={<Projects />} />
-          <Route path="settings" element={<Settings />} />
-             <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="achievements" element={<Achievements />} />
-          <Route path="study-materials" element={<StudyMaterials />} />
-          <Route path="/study-materials/:materialId" element={<StudyMaterials />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+          {/* Protected App Routes */}
+          <Route path="/" element={
+            <ProtectedRoute>
+              <Layout />
+            </ProtectedRoute>
+          }>
+            <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="library" element={<Library />} />
+            <Route path="tasks" element={<Tasks />} />
+            <Route path="focus" element={<Focus />} />
+            <Route path="goals" element={<Goals />} />
+            <Route path="notebook" element={<Notebook />} />
+            <Route path="profile" element={<Profile />} />
+            <Route path="rabbit-holes" element={<RabbitHoles />} />
+            <Route path="projects" element={<Projects />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="achievements" element={<Achievements />} />
+            <Route path="study-materials" element={<StudyMaterials />} />
+            <Route path="study-materials/:materialId" element={<StudyMaterials />} />
+            {/* ✅ Déjà protégé par le Layout parent, pas besoin de ProtectedRoute ici */}
+            <Route path="study-materials/:materialId/chapters/:chapterId" element={<ChapterDetail />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </FocusTimerProvider>
   );
 }
 
