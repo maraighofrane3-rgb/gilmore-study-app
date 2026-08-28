@@ -60,7 +60,7 @@ function formatLabel(dateStr) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export default function Monthlystudyseries({ data, days = 30 }) {
+export default function MonthlyStudySeries({ data, days = 30 }) {
   const series = buildSeries(data, days);
   const maxMinutes = Math.max(60, ...series.map((d) => d.minutes));
   const activeDays = series.filter((d) => d.minutes > 0).length;
