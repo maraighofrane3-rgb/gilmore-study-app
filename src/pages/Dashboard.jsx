@@ -39,7 +39,7 @@ export default function Dashboard() {
         await Promise.all([
           supabase.from('tasks').select('id').eq('user_id', user.id).eq('status', 'todo'),
           supabase
-            .from('focus_sessions')
+            .from('pomodoro_sessions')
             .select('id')
             .eq('user_id', user.id)
             .eq('completed', true)
@@ -55,8 +55,8 @@ export default function Dashboard() {
           supabase.from('profiles').select('current_streak, best_streak').eq('id', user.id).maybeSingle(),
           // ✅ Fix 3 : on ne demande que created_at (duration_minutes n'existe pas)
           supabase
-            .from('focus_sessions')
-            .select('created_at')
+            .from('pomodoro_sessions')
+            .select('created_at, duration') 
             .eq('user_id', user.id)
             .eq('completed', true)
             .gte('created_at', `${thirtyDaysAgoISO}T00:00:00`),
