@@ -36,31 +36,29 @@ export default function Dashboard() {
       const thirtyDaysAgoISO = thirtyDaysAgo.toISOString().split('T')[0];
 
       const [tasksResult, focusResult, goalsResult, streakResult, monthlyFocusResult] =
-        await Promise.all([
-          supabase.from('tasks').select('id').eq('user_id', user.id).eq('status', 'todo'),
-          supabase
-            .from('pomodoro_sessions')
-            .select('id')
-            .eq('user_id', user.id)
-            .eq('completed', true)
-            .gte('created_at', `${today}T00:00:00`),
-          supabase
-            .from('goals')
-            .select('*')
-            .eq('user_id', user.id)
-            .eq('status', 'active')
-            .order('created_at', { ascending: false })
-            .limit(4),
-          // ✅ Fix 2 : .maybeSingle() au lieu de .single() (pas d'erreur si profil inexistant)
-          supabase.from('profiles').select('current_streak, best_streak').eq('id', user.id).maybeSingle(),
-          // ✅ Fix 3 : on ne demande que created_at (duration_minutes n'existe pas)
-          supabase
-            .from('pomodoro_sessions')
-            .select('created_at, duration') 
-            .eq('user_id', user.id)
-            .eq('completed', true)
-            .gte('created_at', `${thirtyDaysAgoISO}T00:00:00`),
-        ]);
+  await Promise.all([
+    supabase.from('tasks').select('id').eq('user_id', user.id).eq('status', 'todo'),
+    supabase
+      .from('pomodoro_sessions')              // ✅ was 'focus_sessions'
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('completed', true)
+      .gte('created_at', `${today}T00:00:00`),
+    supabase
+      .from('goals')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(4),
+    supabase.from('profiles').select('current_streak, best_streak').eq('id', user.id).maybeSingle(), // ✅ was .single()
+    supabase
+      .from('pomodoro_sessions')              // ✅ was 'focus_sessions'
+      .select('created_at, duration')         // ✅ was 'created_at, duration_minutes'
+      .eq('user_id', user.id)
+      .eq('completed', true)
+      .gte('created_at', `${thirtyDaysAgoISO}T00:00:00`),
+  ]);
 
       if (!isMounted) return;
 
@@ -82,7 +80,7 @@ export default function Dashboard() {
       const minutesByDay = {};
       (monthlyFocusResult.data ?? []).forEach((session) => {
         const day = session.created_at.split('T')[0];
-        minutesByDay[day] = (minutesByDay[day] || 0) + 25;
+        minutesByDay[day] = (minutesByDay[day] || 0) + (session.duration || 0);  // ✅ was session.duration_minutes
       });
       setStudyLog(
         Object.entries(minutesByDay).map(([date, minutes]) => ({ date, minutes }))
