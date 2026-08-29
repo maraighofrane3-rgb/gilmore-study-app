@@ -1,83 +1,86 @@
 import { CalendarDays, Sprout } from 'lucide-react';
 
 /**
- * MonthlyStudySeries
- * -------------------
- * Replaces the old "Current Goals" panel on the dashboard with a
- * 30-day vertical bar chart (contribution-graph style) that shows
- * study *regularity* rather than a one-off goal percentage.
- *
- * Props:
- *  - data:  optional array of { date: 'YYYY-MM-DD', minutes: number },
- *           newest day last. If omitted (or shorter than `days`), a
- *           zero-filled skeleton for the trailing `days` days is used
- *           so the chart still looks intentional with no data yet.
- *  - days:  number of days to show (default 30).
- *
- * Usage in Dashboard.jsx:
- *   import MonthlyStudySeries from './MonthlyStudySeries';
- *   ...
- *   <MonthlyStudySeries data={studyLog} />   // instead of <CurrentGoals />
+ * MonthlyStudySeries — weekly line chart, DYNAMIC scale
+ * X: weeks of the last 30 days + weekly total below
+ * Y: auto-adapts from 5m steps up to 24h steps (168h week)
  */
 
-// Builds a full `days`-length skeleton (today last) and overlays any
-// real entries from `data` matched by date. This works whether `data`
-// is empty, sparse (e.g. only days with sessions), or complete —
-// unlike a naive length check, days with no activity simply stay at 0.
-function buildSeries(data, days) {
+const W = 760, H = 320;
+const padL = 46, padR = 16, padT = 16, padB = 52;
+
+function niceStepFor(rawMax) {
+  const STEPS = [
+    5, 10, 15, 30,
+    60, 120, 180, 240, 360, 720,
+    1440, 2880, 4320, 7200, 10080,
+  ];
+  for (const s of STEPS) {
+    if (rawMax / s <= 8) return s;
+  }
+  return 10080;
+}
+
+function formatMinutes(m) {
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem ? `${h}h${rem.toString().padStart(2, '0')}` : `${h}h`;
+}
+
+function buildWeeks(data, days) {
   const today = new Date();
+  const windowStart = new Date(today);
+  windowStart.setDate(today.getDate() - (days - 1));
   const minutesByDate = new Map((data || []).map((d) => [d.date, d.minutes]));
 
-  return Array.from({ length: days }).map((_, i) => {
-    const d = new Date(today);
-    d.setDate(today.getDate() - (days - 1 - i));
-    const dateStr = d.toISOString().slice(0, 10);
-    return { date: dateStr, minutes: minutesByDate.get(dateStr) || 0 };
-  });
-}
+  const monday = new Date(today);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
 
-function getLevel(minutes, max) {
-  if (minutes <= 0) return 0;
-  const ratio = minutes / max;
-  if (ratio > 0.75) return 4;
-  if (ratio > 0.5) return 3;
-  if (ratio > 0.25) return 2;
-  return 1;
-}
-
-// Intensity scale reuses the existing porch-sage token — no new colors
-// introduced, so it inherits each theme's palette automatically.
-const LEVEL_STYLES = [
-  'bg-transparent border border-coffee-cream/25',
-  'bg-porch-sage/25',
-  'bg-porch-sage/45',
-  'bg-porch-sage/70',
-  'bg-porch-sage',
-];
-
-function formatLabel(dateStr) {
-  const d = new Date(`${dateStr}T00:00:00`);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const weekCount = Math.ceil(days / 7);
+  const weeks = [];
+  for (let w = weekCount - 1; w >= 0; w--) {
+    const start = new Date(monday);
+    start.setDate(monday.getDate() - w * 7);
+    let minutes = 0;
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      if (d > today) break;
+      if (d < windowStart) continue;
+      minutes += minutesByDate.get(d.toISOString().slice(0, 10)) || 0;
+    }
+    weeks.push({
+      label: start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      minutes,
+      isCurrent: w === 0,
+    });
+  }
+  return weeks;
 }
 
 export default function MonthlyStudySeries({ data, days = 30 }) {
-  const series = buildSeries(data, days);
-  const maxMinutes = Math.max(60, ...series.map((d) => d.minutes));
-  const activeDays = series.filter((d) => d.minutes > 0).length;
-  const totalMinutes = series.reduce((sum, d) => sum + d.minutes, 0);
+  const weeks = buildWeeks(data, days);
+  const activeWeeks = weeks.filter((w) => w.minutes > 0).length;
+  const totalMinutes = weeks.reduce((s, w) => s + w.minutes, 0);
   const totalHours = (totalMinutes / 60).toFixed(1);
+
+  // 📈 DYNAMIC: hit a new max → step grows + new gridlines added
+  const rawMax = Math.max(5, ...weeks.map((w) => w.minutes));
+  const step = niceStepFor(rawMax);
+  const maxY = Math.max(step * Math.ceil(rawMax / step), step * 2);
+  const gridTicks = [];
+  for (let t = 0; t <= maxY; t += step) gridTicks.push(t);
+
+  const xFor = (i) => padL + (i * (W - padL - padR)) / Math.max(1, weeks.length - 1);
+  const yFor = (v) => H - padB - (Math.min(v, maxY) / maxY) * (H - padT - padB);
 
   return (
     <div className="cozy-card relative p-6 md:p-8">
-      <Sprout
-        size={22}
-        strokeWidth={1.25}
-        className="absolute top-6 right-6 text-porch-sage/25"
-        aria-hidden="true"
-      />
+      <Sprout size={22} strokeWidth={1.25} className="absolute top-6 right-6 text-porch-sage/25" aria-hidden="true" />
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-8">
+      <div className="flex items-start justify-between gap-4 mb-6">
         <div>
           <p className="font-label text-xs uppercase tracking-wider-label text-coffee-cream mb-1">
             Last {days} Days
@@ -87,64 +90,66 @@ export default function MonthlyStudySeries({ data, days = 30 }) {
             Study Series
           </h2>
         </div>
-
         <div className="text-right shrink-0">
           <p className="font-display text-2xl font-semibold text-yale-blue">
-            {activeDays}
-            <span className="text-sm text-coffee-cream font-body">/{days}</span>
+            {activeWeeks}
+            <span className="text-sm text-coffee-cream font-body">/{weeks.length}</span>
           </p>
           <p className="font-label text-[0.6rem] uppercase tracking-wider-label text-coffee-cream">
-            active days &middot; {totalHours}h total
+            active weeks &middot; {totalHours}h total
           </p>
         </div>
       </div>
 
-      {/* Bars */}
+      {/* 📈 Line chart */}
       <div className="overflow-x-auto scrollbar-hide">
-        <div className="flex items-end gap-1 h-40 min-w-[480px]">
-          {series.map((d) => {
-            const level = getLevel(d.minutes, maxMinutes);
-            const heightPct =
-              d.minutes > 0 ? Math.max(8, (d.minutes / maxMinutes) * 100) : 6;
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto select-none" style={{ minWidth: 560 }}>
+          {gridTicks.map((t) => (
+            <g key={`h-${t}`}>
+              <line x1={padL} y1={yFor(t)} x2={W - padR} y2={yFor(t)} stroke="var(--color-coffee-cream)" strokeOpacity={t === maxY ? 0.35 : 0.18} strokeWidth="1" />
+              <text x={padL - 8} y={yFor(t) + 3} textAnchor="end" fontSize="9" fill="var(--color-coffee-cream)">
+                {formatMinutes(t)}
+              </text>
+            </g>
+          ))}
 
-            return (
-              <div
-                key={d.date}
-                title={`${formatLabel(d.date)} — ${
-                  d.minutes > 0 ? `${d.minutes} min` : 'No activity'
-                }`}
-                className="flex-1 flex flex-col justify-end group cursor-default"
-              >
-                <div
-                  className={`w-full rounded-t-sm transition-all duration-300 group-hover:opacity-80 ${LEVEL_STYLES[level]}`}
-                  style={{ height: `${heightPct}%` }}
-                />
-              </div>
-            );
-          })}
-        </div>
+          {weeks.map((w, i) => (
+            <g key={`v-${i}`}>
+              <line x1={xFor(i)} y1={padT} x2={xFor(i)} y2={H - padB} stroke="var(--color-coffee-cream)" strokeOpacity="0.15" strokeWidth="1" />
+              <text x={xFor(i)} y={H - padB + 18} textAnchor="middle" fontSize="9" fontWeight={w.isCurrent ? 'bold' : 'normal'} fill={w.isCurrent ? 'var(--color-maple-rust)' : 'var(--color-coffee-cream)'}>
+                {w.label}
+              </text>
+              <text x={xFor(i)} y={H - padB + 32} textAnchor="middle" fontSize="8" fontWeight={w.isCurrent ? 'bold' : 'normal'} fill={w.isCurrent ? 'var(--color-maple-rust)' : 'var(--color-porch-sage)'}>
+                {formatMinutes(w.minutes)}
+              </text>
+            </g>
+          ))}
+
+          <line x1={padL} y1={padT} x2={padL} y2={H - padB} stroke="var(--color-maple-rust)" strokeWidth="2" />
+          <line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="var(--color-maple-rust)" strokeWidth="2" />
+
+          <polyline
+            points={weeks.map((w, i) => `${xFor(i)},${yFor(w.minutes)}`).join(' ')}
+            fill="none" stroke="var(--color-maple-rust)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+          />
+
+          {weeks.map((w, i) => (
+            <circle key={`p-${i}`} cx={xFor(i)} cy={yFor(w.minutes)} r={w.isCurrent ? 5 : 4}
+              fill={w.isCurrent ? 'var(--color-gilmore-gold)' : 'var(--color-maple-rust)'}
+              stroke="var(--color-page-cream)" strokeWidth="1.5">
+              <title>{`Week of ${w.label} — ${w.minutes > 0 ? `${w.minutes} min` : 'No activity'}`}</title>
+            </circle>
+          ))}
+        </svg>
       </div>
 
-      {/* Footer: date range + legend */}
+      {/* Footer */}
       <div className="flex items-center justify-between mt-3 pt-3 border-t border-coffee-cream/20">
         <span className="font-label text-[0.6rem] uppercase tracking-wider-label text-coffee-cream">
-          {formatLabel(series[0].date)}
+          {weeks[0].label}
         </span>
-
-        <div className="flex items-center gap-1.5">
-          <span className="font-label text-[0.6rem] uppercase tracking-wider-label text-coffee-cream mr-1">
-            Less
-          </span>
-          {LEVEL_STYLES.map((cls, i) => (
-            <span key={i} className={`w-2.5 h-2.5 rounded-sm ${cls}`} />
-          ))}
-          <span className="font-label text-[0.6rem] uppercase tracking-wider-label text-coffee-cream ml-1">
-            More
-          </span>
-        </div>
-
         <span className="font-label text-[0.6rem] uppercase tracking-wider-label text-coffee-cream">
-          {formatLabel(series[series.length - 1].date)}
+          Today
         </span>
       </div>
     </div>

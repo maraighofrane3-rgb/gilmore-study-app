@@ -4,7 +4,10 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { Clock, ListChecks, ArrowRight, Target, Flame, Trophy } from 'lucide-react';
 import DailyCoach from '../components/DailyCoach';
-import MonthlyStudySeries from '../components/MonthlyStudySeries'; // ✅ Fix 1 : casse correcte
+
+// ⚠️ Vérifie bien le chemin : si le fichier est dans src/components/, laisse '../components/MonthlyStudySeries'.
+// S'il est directement dans src/, remplace par '../MonthlyStudySeries'.
+import MonthlyStudySeries from '../components/Monthlystudyseries';
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -35,30 +38,37 @@ export default function Dashboard() {
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
       const thirtyDaysAgoISO = thirtyDaysAgo.toISOString().split('T')[0];
 
-      const [tasksResult, focusResult, goalsResult, streakResult, monthlyFocusResult] =
-  await Promise.all([
-    supabase.from('tasks').select('id').eq('user_id', user.id).eq('status', 'todo'),
-    supabase
-      .from('pomodoro_sessions')              // ✅ was 'focus_sessions'
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('completed', true)
-      .gte('created_at', `${today}T00:00:00`),
-    supabase
-      .from('goals')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('status', 'active')
-      .order('created_at', { ascending: false })
-      .limit(4),
-    supabase.from('profiles').select('current_streak, best_streak').eq('id', user.id).maybeSingle(), // ✅ was .single()
-    supabase
-      .from('pomodoro_sessions')              // ✅ was 'focus_sessions'
-      .select('created_at, duration')         // ✅ was 'created_at, duration_minutes'
-      .eq('user_id', user.id)
-      .eq('completed', true)
-      .gte('created_at', `${thirtyDaysAgoISO}T00:00:00`),
-  ]);
+      const [tasksResult, focusResult, goalsResult, streakResult, monthlyFocusResult] = await Promise.all([
+        supabase.from('tasks').select('id').eq('user_id', user.id).eq('status', 'todo'),
+        
+        supabase
+          .from('pomodoro_sessions')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('completed', true)
+          .gte('created_at', `${today}T00:00:00`),
+          
+        supabase
+          .from('goals')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(4),
+          
+        supabase
+          .from('profiles')
+          .select('current_streak, best_streak')
+          .eq('id', user.id)
+          .maybeSingle(), // ✅ Évite le crash si le profil n'existe pas encore
+          
+        supabase
+          .from('pomodoro_sessions')
+          .select('created_at, duration') // ✅ Utilise la vraie colonne 'duration'
+          .eq('user_id', user.id)
+          .eq('completed', true)
+          .gte('created_at', `${thirtyDaysAgoISO}T00:00:00`),
+      ]);
 
       if (!isMounted) return;
 
@@ -76,12 +86,13 @@ export default function Dashboard() {
         best: streakResult.data?.best_streak ?? 0,
       });
 
-      // ✅ Fix 3 : chaque session compte pour 25 min (pomodoro classique)
+      // Agrège les minutes par jour pour le graphique
       const minutesByDay = {};
       (monthlyFocusResult.data ?? []).forEach((session) => {
         const day = session.created_at.split('T')[0];
-        minutesByDay[day] = (minutesByDay[day] || 0) + (session.duration || 0);  // ✅ was session.duration_minutes
+        minutesByDay[day] = (minutesByDay[day] || 0) + (session.duration || 0);
       });
+      
       setStudyLog(
         Object.entries(minutesByDay).map(([date, minutes]) => ({ date, minutes }))
       );
@@ -103,7 +114,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
-
       {/* Header */}
       <div className="flex items-center justify-between animate-fade-in-up">
         <div>
@@ -129,7 +139,6 @@ export default function Dashboard() {
 
       {/* Corps : colonne gauche empilée + graphique à droite */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
-
         <div className="flex flex-col gap-4">
           {/* Streak */}
           <div className="cozy-card p-5 flex items-center justify-between">
