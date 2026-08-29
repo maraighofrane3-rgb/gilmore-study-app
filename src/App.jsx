@@ -1,5 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Analytics } from '@vercel/analytics/react';   // ✅ React/Vite version
 import { FocusTimerProvider } from './context/FocusTimerContext'; // ✅ named import
+import { FocusTimerProvider } from './context/FocusTimerContext';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
