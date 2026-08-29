@@ -7,7 +7,7 @@ import DailyCoach from '../components/DailyCoach';
 
 // ⚠️ Vérifie bien le chemin : si le fichier est dans src/components/, laisse '../components/MonthlyStudySeries'.
 // S'il est directement dans src/, remplace par '../MonthlyStudySeries'.
-import MonthlyStudySeries from '../components/Monthlystudyseries';
+import MonthlyStudySeries from '../components/MonthlyStudySeries';
 
 function getGreeting() {
   const hour = new Date().getHours();
