@@ -12,6 +12,7 @@ import {
   Settings,
   Trophy,
   GraduationCap,
+  BarChart3,
 } from 'lucide-react';
 import AutumnLeaves from './AutumnLeaves';
 
@@ -30,6 +31,7 @@ export default function Layout() {
     { to: '/goals', icon: Target, label: 'Goals' },
     { to: '/achievements', icon: Trophy, label: 'Achievements' },
     { to: '/settings', icon: Settings, label: 'Settings' },
+    { to: '/history', label: 'History', icon: BarChart3 },
     { to: '/profile', icon: User, label: 'Profile' },
   ];
 

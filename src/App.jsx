@@ -18,6 +18,7 @@ import ForgotPassword from './pages/ForgotPassword';
 import Achievements from './pages/Achievements';
 import StudyMaterials from './pages/StudyMaterials';
 import ChapterDetail from './pages/ChapterDetail';
+import History from './pages/History';
 
 function App() {
   return (
@@ -53,6 +54,7 @@ function App() {
             <Route path="study-materials/:materialId" element={<StudyMaterials />} />
             {/* ✅ Déjà protégé par le Layout parent, pas besoin de ProtectedRoute ici */}
             <Route path="study-materials/:materialId/chapters/:chapterId" element={<ChapterDetail />} />
+            <Route path="history" element={<History />} />
           </Route>
         </Routes>
       </BrowserRouter>
