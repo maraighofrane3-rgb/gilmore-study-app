@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useFocusTimer } from '../context/FocusTimerContext';
-import { Target, TrendingUp, BookOpen, Play, Pause, RotateCcw } from 'lucide-react';
+import { Target, TrendingUp, BookOpen, Play, Pause, RotateCcw, CheckCircle  } from 'lucide-react';
 
 const DURATIONS = [
   { label: '25m', min: 25 },
@@ -11,10 +11,11 @@ const DURATIONS = [
   { label: '2h', min: 120 },
 ];
 
-function formatTime(totalSeconds) {
-  const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
-  const s = (totalSeconds % 60).toString().padStart(2, '0');
-  return `${m}:${s}`;
+function formatHMS(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
 function formatMinutes(m) {
@@ -31,10 +32,10 @@ const padL = 46, padR = 16, padT = 16, padB = 52;
 export default function Focus() {
   const { user } = useAuth();
   const {
-    timeLeft, isRunning, durationMin,
-    start, pause, reset, changeDuration,
-    selectedTaskId, setSelectedTaskId, completedAt,
-  } = useFocusTimer();
+  timeLeft, isRunning, durationMin,
+  start, pause, reset, changeDuration,
+  selectedTaskId, setSelectedTaskId, completedAt, done,
+} = useFocusTimer();
 
   const [tasks, setTasks] = useState([]);
   const [todayMinutes, setTodayMinutes] = useState(0);
@@ -90,7 +91,9 @@ export default function Focus() {
   };
 
   const goalMinutes = dailyGoal * 60;
-  const percent = Math.min(100, Math.round((todayMinutes / goalMinutes) * 100));
+   const liveSeconds = timeLeft < durationMin * 60 ? durationMin * 60 - timeLeft : 0;
+  const totalSeconds = todayMinutes * 60 + liveSeconds;
+  const percent = Math.min(100, Math.round((totalSeconds / (goalMinutes * 60)) * 100));
   const todayStr = new Date().toISOString().split('T')[0];
 
    // 📈 Fixed Y axis: 0 → 23h45, thin gridline every 45 min
@@ -115,8 +118,8 @@ export default function Focus() {
           </div>
         </div>
         <div className="flex-1 min-w-[200px]">
-          <p className="font-body text-sm text-coffee-cream mb-2">
-            {Math.floor(todayMinutes / 60)}h {todayMinutes % 60}m completed
+                    <p className="font-body text-sm text-coffee-cream mb-2 tabular-nums">
+            {formatHMS(totalSeconds)} completed
           </p>
           <div className="w-full bg-coffee-cream/20 rounded-full h-2">
             <div className="h-2 rounded-full bg-maple-rust transition-all duration-500" style={{ width: `${percent}%` }} />
@@ -149,7 +152,7 @@ export default function Focus() {
 
       {/* Timer */}
       <div className="text-center py-6">
-        <p className="font-display text-8xl md:text-9xl text-yale-blue tracking-tight">{formatTime(timeLeft)}</p>
+        <p className="font-display text-8xl md:text-9xl text-yale-blue tracking-tight">{formatHMS(timeLeft)}</p>
         <p className="font-label text-sm uppercase tracking-widest text-coffee-cream mt-2">Focus Time</p>
       </div>
 
@@ -170,15 +173,33 @@ export default function Focus() {
         ))}
       </div>
 
-      {/* Controls */}
-      <div className="flex justify-center gap-3">
+          {/* Controls */}
+      <div className="flex justify-center gap-3 flex-wrap">
+        {isRunning ? (
+          <button
+            onClick={pause}
+            className="flex items-center gap-2 bg-yale-blue text-page-cream px-8 py-3.5 rounded-sm font-label text-sm uppercase tracking-wider hover:bg-maple-rust transition-all"
+          >
+            <Pause size={18} /> Pause
+          </button>
+        ) : (
+          <button
+            onClick={start}
+            className="flex items-center gap-2 bg-maple-rust text-page-cream px-8 py-3.5 rounded-sm font-label text-sm uppercase tracking-wider hover:bg-yale-blue transition-all"
+          >
+            <Play size={18} /> {timeLeft !== durationMin * 60 ? 'Resume' : 'Start Focus'}
+          </button>
+        )}
+
+        {/* ✅ Done: banks elapsed time even mid-session */}
         <button
-          onClick={isRunning ? pause : start}
-          className="flex items-center gap-2 bg-maple-rust text-page-cream px-8 py-3.5 rounded-sm font-label text-sm uppercase tracking-wider hover:bg-yale-blue transition-all"
+          onClick={done}
+          disabled={timeLeft === durationMin * 60}
+          className="flex items-center gap-2 bg-porch-sage text-page-cream px-6 py-3.5 rounded-sm font-label text-sm uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {isRunning ? <Pause size={18} /> : <Play size={18} />}
-          {isRunning ? 'Pause' : 'Start Focus'}
+          <CheckCircle size={18} /> Done
         </button>
+
         <button
           onClick={reset}
           className="flex items-center gap-2 border border-coffee-cream/30 text-coffee-cream px-6 py-3.5 rounded-sm font-label text-sm uppercase tracking-wider hover:border-maple-rust hover:text-maple-rust transition-all"

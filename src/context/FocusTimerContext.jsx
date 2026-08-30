@@ -13,27 +13,19 @@ export function FocusTimerProvider({ children }) {
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [completedAt, setCompletedAt] = useState(null);
 
-  // ⏱️ The tick lives at app level → navigation never kills it
+  // ⏱️ Tick (app-level, survives navigation)
   useEffect(() => {
     if (!isRunning) return;
     const id = setInterval(() => setTimeLeft((prev) => Math.max(0, prev - 1)), 1000);
     return () => clearInterval(id);
   }, [isRunning]);
 
-  // ✅ Completion → record the session no matter which page you're on
-  useEffect(() => {
-    if (timeLeft === 0 && isRunning) {
-      setIsRunning(false);
-      recordSession();
-    }
-  }, [timeLeft, isRunning]);
-
-  const recordSession = async () => {
+  const recordSession = async (minutes) => {
     if (user) {
       const { error } = await supabase.from('pomodoro_sessions').insert([{
         user_id: user.id,
         task_id: selectedTaskId || null,
-        duration: durationMin,
+        duration: minutes,
         completed: true,
       }]);
       if (error) console.error('Failed to record session:', error);
@@ -42,7 +34,15 @@ export function FocusTimerProvider({ children }) {
     setTimeLeft(durationMin * 60);
   };
 
-  // 🌟 Bonus: countdown shows in the browser tab title on every page
+  // ✅ Natural completion (full time)
+  useEffect(() => {
+    if (timeLeft === 0 && isRunning) {
+      setIsRunning(false);
+      recordSession(durationMin);
+    }
+  }, [timeLeft, isRunning]);
+
+  // 🌟 Countdown in the browser tab
   useEffect(() => {
     if (isRunning) {
       const m = Math.floor(timeLeft / 60).toString().padStart(2, '0');
@@ -58,10 +58,19 @@ export function FocusTimerProvider({ children }) {
   const reset = () => { setIsRunning(false); setTimeLeft(durationMin * 60); };
   const changeDuration = (min) => { setDurationMin(min); setIsRunning(false); setTimeLeft(min * 60); };
 
+  // ✅ DONE: bank the ELAPSED time, even if the session isn't finished
+  const done = () => {
+    const elapsedSeconds = durationMin * 60 - timeLeft;
+    if (elapsedSeconds <= 0) return; // nothing studied yet
+    const minutes = Math.max(1, Math.round(elapsedSeconds / 60));
+    setIsRunning(false);
+    recordSession(minutes);
+  };
+
   return (
     <FocusTimerContext.Provider value={{
       durationMin, timeLeft, isRunning, selectedTaskId, completedAt,
-      setSelectedTaskId, start, pause, reset, changeDuration,
+      setSelectedTaskId, start, pause, reset, changeDuration, done,
     }}>
       {children}
     </FocusTimerContext.Provider>

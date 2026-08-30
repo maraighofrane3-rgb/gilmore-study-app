@@ -5,7 +5,7 @@ const LEAF_COLORS = ['text-maple-rust', 'text-gilmore-gold', 'text-porch-sage'];
 const LEAVES = Array.from({ length: 20 }).map((_, i) => ({
   id: i,
   left: `${(i * 10 + 4) % 100}%`,
-  delay: `${i * 2}s`,
+  delay: `${i * 1}s`,
   duration: `${16 + (i % 4) * 4}s`,
   size: 22 + (i % 3) * 10,
   color: LEAF_COLORS[i % LEAF_COLORS.length],

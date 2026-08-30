@@ -20,7 +20,7 @@ import Achievements from './pages/Achievements';
 import StudyMaterials from './pages/StudyMaterials';
 import ChapterDetail from './pages/ChapterDetail';
 import History from './pages/History';
-
+import TaskDay from './pages/TaskDay';
 function App() {
   return (
     // ✅ Le provider enveloppe TOUT le routeur.
@@ -43,6 +43,7 @@ function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="library" element={<Library />} />
             <Route path="tasks" element={<Tasks />} />
+            <Route path="tasks/:date" element={<TaskDay />} />
             <Route path="focus" element={<Focus />} />
             <Route path="goals" element={<Goals />} />
             <Route path="notebook" element={<Notebook />} />

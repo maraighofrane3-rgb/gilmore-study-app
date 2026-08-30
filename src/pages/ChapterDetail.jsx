@@ -60,9 +60,17 @@ export default function ChapterDetail() {
     }
   }, [notification.show]);
 
+   // 📖 Remember the last opened chapter for the Dashboard "Resume" card
   useEffect(() => {
-    if (user && chapterId) fetchAll();
-  }, [user, chapterId]);
+    if (chapter) {
+      localStorage.setItem('rgw-last-chapter', JSON.stringify({
+        materialId,
+        chapterId,
+        title: chapter.title,
+        at: Date.now(),
+      }));
+    }
+  }, [chapter, materialId, chapterId]);
 
   const showNotification = (message, type = 'success') => setNotification({ show: true, message, type });
 
