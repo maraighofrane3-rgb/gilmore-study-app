@@ -22,6 +22,9 @@ export default function BookDetail({ book, onBack }) {
   const [activeAction, setActiveAction] = useState(null);
   const [result, setResult] = useState('');
   const [justSaved, setJustSaved] = useState(false);
+  const [usePdfText, setUsePdfText] = useState(false); // ✅ Mode PDF direct
+    const [fromPage, setFromPage] = useState('');
+  const [toPage, setToPage] = useState('');
 
   // 📖 Reading Progress states
   const [progressPage, setProgressPage] = useState('');
@@ -29,7 +32,10 @@ export default function BookDetail({ book, onBack }) {
   const [savingProgress, setSavingProgress] = useState(false);
 
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
-
+    // 💭 Personal Reflection states
+  const [personalReflection, setPersonalReflection] = useState(book.personal_reflection || '');
+  const [editingReflection, setEditingReflection] = useState(false);
+  const [savingReflection, setSavingReflection] = useState(false);
   useEffect(() => {
     if (currentBook) fetchNotes();
   }, [currentBook]);
@@ -84,6 +90,7 @@ export default function BookDetail({ book, onBack }) {
       if (error) throw error;
 
       setCurrentBook({ ...currentBook, pdf_url: publicUrl, ai_text_content: extractedText });
+      setUsePdfText(true); // ✅ Active automatiquement le mode PDF après upload
       showNotification('PDF attached! The Librarian can now read your book.');
     } catch (err) {
       console.error('Book PDF upload error:', err);
@@ -132,11 +139,59 @@ export default function BookDetail({ book, onBack }) {
     showNotification('Book completed! 🎉');
   };
 
+    // 💭 Save personal reflection
+  const savePersonalReflection = async () => {
+    setSavingReflection(true);
+    const { error } = await supabase
+      .from('books')
+      .update({ personal_reflection: personalReflection })
+      .eq('id', currentBook.id);
+    setSavingReflection(false);
+
+    if (error) {
+      showNotification('Failed to save reflection.', 'error');
+      return;
+    }
+    setCurrentBook({ ...currentBook, personal_reflection: personalReflection });
+    setEditingReflection(false);
+    showNotification('Reflection saved!');
+  };
+
+    // 📄 Extract only the text between page X and page Y (uses the "--- Page N ---" markers)
+  const getPageRangeText = (from, to) => {
+    const content = currentBook.ai_text_content || '';
+    if (!content) return '';
+
+    const parts = content.split(/---\s*Page\s+(\d+)\s*---/);
+    // No markers found → fallback to the whole text
+    if (parts.length < 3) return content;
+
+    const pages = {};
+    for (let i = 1; i < parts.length; i += 2) {
+      pages[parseInt(parts[i], 10)] = (parts[i + 1] || '').trim();
+    }
+
+    let result = '';
+    for (let p = from; p <= to; p++) {
+      if (pages[p]) result += pages[p] + '\n\n';
+    }
+    return result.trim();
+  };
+
   // 🤖 Analyze excerpt or full PDF text
-  const handleAnalyze = async (action) => {
-    const sourceText = inputText.trim() || (currentBook.ai_text_content || '');
+     const handleAnalyze = async (action) => {
+    const f = Math.max(1, parseInt(fromPage, 10) || 1);
+    const t = Math.max(f, parseInt(toPage, 10) || f);
+    const scope = usePdfText ? `pages ${f} to ${t}` : 'this excerpt';
+
+    const sourceText = usePdfText
+      ? getPageRangeText(f, t)
+      : (inputText.trim() || (currentBook.ai_text_content || ''));
+
     if (!sourceText) {
-      showNotification('Paste an excerpt or upload the book PDF first.', 'error');
+      showNotification(usePdfText
+        ? 'No text found in that page range. Check the page numbers.'
+        : 'Paste an excerpt or upload the book PDF first.', 'error');
       return;
     }
 
@@ -147,17 +202,32 @@ export default function BookDetail({ book, onBack }) {
 
     try {
       let systemPrompt = '';
-      if (action === 'summarize') systemPrompt = `Provide a concise, clear summary of this excerpt from "${currentBook.title}". Focus on the main ideas and key takeaways in 2-3 paragraphs.`;
-      else if (action === 'explain') systemPrompt = `Explain this excerpt from "${currentBook.title}" in simple, clear terms. Break down any complex concepts or jargon.`;
-      else if (action === 'quotes') systemPrompt = 'Extract the most beautiful, meaningful or powerful quotes from this text. Return each quote on its own line, wrapped in quotation marks.';
+      // ✅ Limite intelligente selon l'action
+      let charLimit = 12000; // Default pour summarize/explain
+      
+      if (action === 'summarize') {
+        systemPrompt = `Provide a concise, clear summary of ${scope} from "${currentBook.title}". Focus on the main ideas and key takeaways in 2-3 paragraphs.`;
+        charLimit = 12000;
+      } else if (action === 'explain') {
+        systemPrompt = `Explain ${scope} from "${currentBook.title}" in simple, clear terms. Break down any complex concepts or jargon.`;
+        charLimit = 12000;
+      } else if (action === 'quotes') {
+        // ✅ Limite à 3-5 citations pour éviter les réponses trop longues
+        systemPrompt = `Extract exactly 3 to 5 of the most beautiful, meaningful or powerful quotes from ${scope} of "${currentBook.title}". Return each quote on its own line, wrapped in quotation marks, followed by a brief one-line interpretation. Do NOT exceed 5 quotes.`;
+        charLimit = 8000; // Quotes n'ont pas besoin d'autant de contexte
+      }
 
       const { data, error } = await supabase.functions.invoke('summarize-text', {
-        body: { text: sourceText.substring(0, 4000), action, custom_prompt: systemPrompt },
+        body: { 
+          text: sourceText.substring(0, charLimit), 
+          action, 
+          custom_prompt: systemPrompt 
+        },
       });
 
       if (error) throw new Error(error.message || 'Failed to analyze');
       setResult(data.result);
-      showNotification('Analysis complete!');
+      showNotification(`Analysis of ${scope} complete!`);
     } catch (err) {
       console.error('Analysis error:', err);
       showNotification(`Failed to analyze: ${err.message}`, 'error');
@@ -341,6 +411,65 @@ export default function BookDetail({ book, onBack }) {
         </form>
       </div>
 
+            {/* 💭 Personal Reflection */}
+      <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="font-display text-lg text-yale-blue flex items-center gap-2">
+            <Sparkles size={18} className="text-gilmore-gold" /> My Reflection
+          </h3>
+          {!editingReflection && (
+            <button
+              onClick={() => setEditingReflection(true)}
+              className="flex items-center gap-2 text-maple-rust hover:text-yale-blue transition-colors font-label text-xs uppercase tracking-wider"
+            >
+              {personalReflection ? 'Edit' : 'Write'}
+            </button>
+          )}
+        </div>
+
+        {editingReflection ? (
+          <div className="space-y-3">
+            <textarea
+              value={personalReflection}
+              onChange={(e) => setPersonalReflection(e.target.value)}
+              placeholder="Write your thoughts, insights, or feelings about this book..."
+              className="w-full p-4 bg-page-cream border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm h-48 resize-y"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setEditingReflection(false);
+                  setPersonalReflection(currentBook.personal_reflection || '');
+                }}
+                className="px-4 py-2 border border-coffee-cream/30 rounded-sm font-label text-xs uppercase tracking-wider text-coffee-cream hover:bg-coffee-cream/10 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={savePersonalReflection}
+                disabled={savingReflection}
+                className="flex items-center gap-2 bg-maple-rust text-page-cream px-4 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50"
+              >
+                {savingReflection ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Save
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="min-h-[100px]">
+            {personalReflection ? (
+              <p className="font-body text-sm text-library-ink leading-relaxed whitespace-pre-wrap">
+                {personalReflection}
+              </p>
+            ) : (
+              <p className="font-body text-sm text-coffee-cream/60 italic">
+                No reflection yet. Click "Write" to share your thoughts about this book.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* 🤖 The Librarian */}
       <div className="bg-page-cream p-6 rounded-sm border-l-4 border-gilmore-gold shadow-cozy space-y-4">
         <div className="flex items-center gap-2">
@@ -353,11 +482,71 @@ export default function BookDetail({ book, onBack }) {
             : `Paste a passage from "${currentBook.title}", or upload the PDF so I can read it for you.`}
         </p>
 
+        {/* 📄 Bouton : Analyze the full PDF directly */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (!currentBook.ai_text_content) {
+                showNotification('Upload the book PDF first.', 'error');
+                return;
+              }
+              setUsePdfText(true);
+              setInputText('');
+            }}
+            className={`flex items-center gap-2 px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider border transition-all ${
+              usePdfText
+                ? 'bg-maple-rust text-page-cream border-maple-rust'
+                : 'border-coffee-cream/30 text-coffee-cream hover:bg-coffee-cream/10'
+            }`}
+          >
+            <FileText size={14} /> Analyze the full PDF directly
+          </button>
+          {usePdfText && (
+            <button
+              type="button"
+              onClick={() => setUsePdfText(false)}
+              className="font-label text-xs uppercase tracking-wider text-coffee-cream hover:text-maple-rust transition-colors underline"
+            >
+              Use a pasted passage instead
+            </button>
+          )}
+        </div>
+
+                {usePdfText && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-label text-xs uppercase tracking-wider text-coffee-cream">Analyze pages:</span>
+            <input
+              type="number"
+              min="1"
+              value={fromPage}
+              onChange={(e) => setFromPage(e.target.value)}
+              placeholder="From (1)"
+              className="w-24 p-2.5 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+            />
+            <span className="text-coffee-cream font-body">→</span>
+            <input
+              type="number"
+              min="1"
+              value={toPage}
+              onChange={(e) => setToPage(e.target.value)}
+              placeholder="To (10)"
+              className="w-24 p-2.5 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+            />
+            <span className="font-body text-xs text-coffee-cream italic">Tip: 5–15 pages at a time gives the best results.</span>
+          </div>
+        )}
+
         <textarea
           value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          placeholder="Paste a paragraph or passage from this book (optional if PDF uploaded)..."
-          className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm h-32 resize-y"
+          onChange={(e) => { setInputText(e.target.value); setUsePdfText(false); }}
+          disabled={usePdfText}
+          placeholder={
+            usePdfText
+              ? 'Full-PDF mode enabled — just click Summarize, Explain Simply or Extract Quotes below.'
+              : 'Paste a paragraph or passage from this book (optional if PDF uploaded)...'
+          }
+          className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm h-32 resize-y disabled:opacity-50"
         />
 
         <div className="flex flex-wrap gap-2">

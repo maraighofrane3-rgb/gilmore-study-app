@@ -6,7 +6,7 @@ import { extractTextFromPDF, renderPDFAsImages } from '../utils/pdfWorker';
 import {
   ArrowLeft, Loader2, Sparkles, FileText, Lightbulb, List, X,
   Save, CheckCircle, ChevronDown, Upload, FileText as FileIcon,
-  MessageCircle, Send, Trash2, Pencil, Plus, StickyNote
+  MessageCircle, Send, Trash2, Pencil, Plus, StickyNote, HelpCircle
 } from 'lucide-react';
 
 export default function ChapterDetail() {
@@ -26,6 +26,8 @@ export default function ChapterDetail() {
   const [savingEdit, setSavingEdit] = useState(false);
 
   const [analyzing, setAnalyzing] = useState(false);
+    const [fromPage, setFromPage] = useState('');
+  const [toPage, setToPage] = useState('');
   const [activeAction, setActiveAction] = useState(null);
   const [chapterResult, setChapterResult] = useState('');
   const [justSaved, setJustSaved] = useState(false);
@@ -90,45 +92,47 @@ export default function ChapterDetail() {
     setLoading(false);
   };
 
-    const handlePDFUpload = async (e) => {
+      const handlePDFUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || file.type !== 'application/pdf') return;
 
     setUploadingPDF(true);
     try {
-      // 1. Extract raw text FOR THE AI
+      // 1. ✅ Extract text WITH page markers (for the AI + page ranges)
       const extractedText = await extractTextFromPDF(file);
 
-      // 2. Generate HTML with images FOR DISPLAY
+      // 2. Render images (for display)
       const htmlContent = await renderPDFAsImages(file);
 
-      const divider = `\n\n<div class="pdf-divider" style="text-align: center; margin: 2rem 0; color: #8b5e3c; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; border-top: 1px solid #d4c5b5; border-bottom: 1px solid #d4c5b5; padding: 1rem 0;">📄 ${file.name} · added on ${new Date().toLocaleDateString()}</div>\n\n`;
+      const divider = `\n\n<div class="pdf-divider" style="text-align: center; margin: 2rem 0; color: #8b5e3c; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; border-top: 1px solid #d4c5b5; border-bottom: 1px solid #d4c5b5; padding: 1rem 0;">📄 ${file.name} · ajouté le ${new Date().toLocaleDateString()}</div>\n\n`;
 
-      const newContent = (chapter.content ? chapter.content + divider : '') + htmlContent;
+      const isExistingHtml = chapter.content && (chapter.content.includes('<img') || chapter.content.includes('<div class="pdf-pages"'));
 
-      // 3. Save into two separate columns!
+      const newContent = isExistingHtml
+        ? chapter.content + divider + htmlContent
+        : (chapter.content ? `<div style="white-space: pre-wrap;">${chapter.content}</div>` + divider : '') + htmlContent;
+
       const { error } = await supabase
         .from('chapters')
         .update({
-          content: newContent,          // For display (Images/HTML)
-          ai_text_content: extractedText, // For the AI (clean raw text)
+          content: newContent,
+          // ✅ Append the extracted text so the AI can read it
+          ai_text_content: (chapter.ai_text_content ? chapter.ai_text_content + '\n\n' : '') + extractedText,
           is_from_pdf: true
         })
         .eq('id', chapterId);
 
       if (error) throw error;
-
       setChapter({
         ...chapter,
         content: newContent,
-        ai_text_content: extractedText, // Update local state
+        ai_text_content: (chapter.ai_text_content ? chapter.ai_text_content + '\n\n' : '') + extractedText,
         is_from_pdf: true
       });
-
-      showNotification(`PDF added successfully! (Text isolated for AI)`);
+      showNotification(`PDF ajouté ! Texte extrait pour l'IA.`);
     } catch (err) {
-      console.error('PDF upload error:', err);
-      showNotification(`PDF processing failed: ${err.message}`, 'error');
+      console.error('Erreur upload PDF:', err);
+      showNotification(`Échec du traitement du PDF: ${err.message}`, 'error');
     }
     setUploadingPDF(false);
     e.target.value = '';
@@ -161,10 +165,60 @@ export default function ChapterDetail() {
     showNotification('Chapter updated!');
   };
 
-    const handleAnalyze = async (action) => {
-    // Use ai_text_content first, otherwise fall back to content (for manual chapters)
-    const rawText = chapter.ai_text_content || chapter.content;
-    if (!chapter || !rawText) return;
+
+    // 📄 Extract only the text between page X and page Y (uses the "--- Page N ---" markers)
+  const getPageRangeText = (from, to) => {
+    const content = chapter.ai_text_content || chapter.content || '';
+    if (!content) return '';
+
+    const parts = content.split(/---\s*Page\s+(\d+)\s*---/);
+    // No markers found (manual chapter) → fallback to the whole text
+    if (parts.length < 3) return content;
+
+    const pages = {};
+    for (let i = 1; i < parts.length; i += 2) {
+      pages[parseInt(parts[i], 10)] = (parts[i + 1] || '').trim();
+    }
+
+    let result = '';
+    for (let p = from; p <= to; p++) {
+      if (pages[p]) result += pages[p] + '\n\n';
+    }
+    return result.trim();
+  };
+
+        const handleAnalyze = async (action) => {
+    // Get the best available text source
+    let rawText = chapter.ai_text_content || '';
+    
+    // Fallback to content if ai_text_content doesn't exist
+    if (!rawText && chapter.content) {
+      // Clean HTML tags from content if it contains HTML
+      rawText = chapter.content.includes('<img') || chapter.content.includes('<div')
+        ? chapter.content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ')
+        : chapter.content;
+    }
+    
+    if (!rawText || !rawText.trim()) {
+      showNotification('No text available to analyze. Upload a PDF or add content first.', 'error');
+      return;
+    }
+
+    const f = Math.max(1, parseInt(fromPage, 10) || 1);
+    const t = Math.max(f, parseInt(toPage, 10) || f);
+    const hasRange = fromPage !== '' || toPage !== '';
+    const scope = hasRange ? `pages ${f} to ${t}` : 'this chapter';
+
+    // Extract page range if specified
+    let sourceText = hasRange ? getPageRangeText(f, t) : rawText;
+    
+    // Clean any remaining HTML or extra whitespace
+    sourceText = sourceText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    
+    if (!sourceText) {
+      showNotification('No text found in that page range. Check the page numbers.', 'error');
+      return;
+    }
 
     setAnalyzing(true);
     setActiveAction(action);
@@ -173,24 +227,45 @@ export default function ChapterDetail() {
     setNoteTitle('');
 
     try {
-      // No more regex needed! Just take the first 4000 characters of the clean text
-      const textToSend = rawText.substring(0, 4000);
-
       let systemPrompt = '';
-      if (action === 'summarize') systemPrompt = 'Write a clear, concise summary of this study content. Focus on the main concepts and key points in 2-3 paragraphs.';
-      else if (action === 'explain') systemPrompt = 'Explain this content in simple, clear terms, breaking down complex concepts or jargon.';
-      else if (action === 'keypoints') systemPrompt = 'Extract the 5 to 7 most important points. Present them as a bulleted list.';
+      let charLimit = 12000;
+      
+      if (action === 'summarize') {
+        systemPrompt = `Provide a concise, clear summary of ${scope} from "${chapter.title}". Focus on the main ideas and key takeaways in 2-3 paragraphs.`;
+        charLimit = 12000;
+      } else if (action === 'explain') {
+        systemPrompt = `Explain ${scope} from "${chapter.title}" in simple, clear terms. Break down any complex concepts or jargon.`;
+        charLimit = 12000;
+      } else if (action === 'keypoints') {
+        systemPrompt = `Extract the 5-7 most important key points from ${scope} of "${chapter.title}". Present them as a bulleted list.`;
+        charLimit = 8000;
+      }       else if (action === 'quiz') {
+        systemPrompt = `Create a multiple-choice quiz (QCM) of 5 questions about ${scope} of "${chapter.title}". Format it EXACTLY like this:
+
+1. Question text
+A) option
+B) option
+C) option
+D) option
+
+(after the 5 questions, add a line "Answers:" then list the correct letters, e.g. 1-B, 2-A, 3-C, 4-D, 5-A). Keep questions clear and focused on the key ideas.`;
+        charLimit = 8000;
+      }
 
       const { data, error } = await supabase.functions.invoke('summarize-text', {
-        body: { text: textToSend, action, custom_prompt: systemPrompt },
+        body: { 
+          text: sourceText.substring(0, charLimit), 
+          action, 
+          custom_prompt: systemPrompt 
+        },
       });
 
       if (error) throw new Error(error.message || 'Failed to analyze');
       setChapterResult(data.result);
-      showNotification('Analysis complete!');
+      showNotification(`Analysis of ${scope} complete!`);
     } catch (err) {
       console.error('Analysis error:', err);
-      showNotification(`Analysis failed: ${err.message}`, 'error');
+      showNotification(`Failed to analyze: ${err.message}`, 'error');
     }
     setAnalyzing(false);
   };
@@ -236,6 +311,7 @@ export default function ChapterDetail() {
       if (activeAction === 'summarize') noteData.ai_summary = chapterResult;
       else if (activeAction === 'explain') noteData.ai_explanation = chapterResult;
       else if (activeAction === 'keypoints') noteData.ai_key_points = chapterResult.split('\n').filter(line => line.trim());
+      else if (activeAction === 'quiz') noteData.ai_summary = `📝 QUIZ (QCM)\n\n${chapterResult}`;
 
       const { error } = await supabase.from('chapter_notes').insert([noteData]);
       if (error) throw error;
@@ -435,6 +511,30 @@ export default function ChapterDetail() {
           <h3 className="font-display text-lg text-yale-blue">AI Study Assistant</h3>
         </div>
 
+        
+        {/* 👇👇👇 PAGE INPUTS — PASTED HERE, BETWEEN TITLE AND BUTTONS 👇👇👇 */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-label text-xs uppercase tracking-wider text-coffee-cream">Analyser les pages :</span>
+          <input
+            type="number"
+            min="1"
+            value={fromPage}
+            onChange={(e) => setFromPage(e.target.value)}
+            placeholder="De (1)"
+            className="w-24 p-2.5 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+          />
+          <span className="text-coffee-cream font-body">→</span>
+          <input
+            type="number"
+            min="1"
+            value={toPage}
+            onChange={(e) => setToPage(e.target.value)}
+            placeholder="À (10)"
+            className="w-24 p-2.5 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+          />
+          <span className="font-body text-xs text-coffee-cream italic">Laissez vide pour analyser tout le chapitre.</span>
+        </div>
+
         <div className="flex flex-wrap gap-2">
           <button onClick={() => handleAnalyze('summarize')} disabled={analyzing || !chapter.content} className="flex items-center gap-2 bg-yale-blue text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
             {analyzing && activeAction === 'summarize' ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />} Summarize
@@ -444,6 +544,9 @@ export default function ChapterDetail() {
           </button>
           <button onClick={() => handleAnalyze('keypoints')} disabled={analyzing || !chapter.content} className="flex items-center gap-2 bg-gilmore-gold text-yale-blue px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust hover:text-page-cream transition-all disabled:opacity-50">
             {analyzing && activeAction === 'keypoints' ? <Loader2 size={14} className="animate-spin" /> : <List size={14} />} Key Points
+          </button>
+                    <button onClick={() => handleAnalyze('quiz')} disabled={analyzing || !chapter.content} className="flex items-center gap-2 bg-maple-rust text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50">
+            {analyzing && activeAction === 'quiz' ? <Loader2 size={14} className="animate-spin" /> : <HelpCircle size={14} />} Quiz (QCM)
           </button>
         </div>
 
