@@ -6,33 +6,26 @@ import {
   StickyNote, Target, TrendingUp, CalendarDays, Award, Timer, CheckCircle
 } from 'lucide-react';
 
-// 📈 Chart geometry (same design as Focus & Study Series)
-const W = 760, H = 320;
-const padL = 46, padR = 16, padT = 16, padB = 52;
+// Display-only rounding — storage keeps exact fractional minutes (see
+// FocusTimerContext.done()); this just decides how to show them
+// (seconds for tiny durations, whole minutes/hours otherwise) instead
+// of a raw decimal like "14.233333333333325m".
+function formatMinutes(totalMin) {
+  const totalSeconds = Math.round(totalMin * 60);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
 
-// 📏 Picks a time-friendly step (5m → 7 days) so the axis ALWAYS fits,
-// even when a week reaches its theoretical max of 24h × 7 = 168h.
-function niceStepFor(rawMax) {
-  const STEPS = [
-    5, 10, 15, 30,                 // minutes
-    60, 120, 180, 240, 360, 720,   // 1h → 12h
-    1440, 2880, 4320, 7200, 10080, // 24h → 168h (full week)
-  ];
-  for (const s of STEPS) {
-    if (rawMax / s <= 8) return s; // keep 8 ticks or fewer → always readable
-  }
-  return 10080;
+  if (h > 0) return m > 0 ? `${h}h${String(m).padStart(2, '0')}` : `${h}h`;
+  if (m > 0) return `${m}m`;
+  return `${s}s`;
 }
 
-function formatMinutes(m) {
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  return rem ? `${h}h${rem.toString().padStart(2, '0')}` : `${h}h`;
-}
-
-function formatLong(m) {
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
+function formatLong(totalMin) {
+  const rounded = Math.round(totalMin);
+  const h = Math.floor(rounded / 60);
+  const m = rounded % 60;
+  return `${h}h ${m}m`;
 }
 
 export default function History() {
@@ -114,6 +107,7 @@ export default function History() {
       if (bucket) bucket.minutes += s.duration || 0;
     }
   });
+  const maxWeekMinutes = Math.max(0, ...weekBuckets.map((w) => w.minutes));
 
   // 🏆 Most productive weekday (all time)
   const weekdayTotals = [0, 0, 0, 0, 0, 0, 0];
@@ -122,16 +116,6 @@ export default function History() {
   const bestDay = bestDayTotal > 0
     ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][weekdayTotals.indexOf(bestDayTotal)]
     : null;
-
-  // 📈 DYNAMIC scale: ✅ CORRECTION ICI (abaissement du seuil de 60 à 5)
-  const rawMax = Math.max(5, ...weekBuckets.map((w) => w.minutes));
-  const step = niceStepFor(rawMax);
-  const maxY = Math.max(step * Math.ceil(rawMax / step), step * 2);
-  const gridTicks = [];
-  for (let t = 0; t <= maxY; t += step) gridTicks.push(t);
-
-  const xFor = (i) => padL + (i * (W - padL - padR)) / Math.max(1, weekBuckets.length - 1);
-  const yFor = (v) => H - padB - (Math.min(v, maxY) / maxY) * (H - padT - padB);
 
   const recentDone = [...doneTasks]
     .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))
@@ -214,8 +198,8 @@ export default function History() {
         ))}
       </div>
 
-      {/* 📈 Weekly study time — current month */}
-      <div className="cozy-card p-6 space-y-4">
+      {/* 📊 Weekly study time — current month, auto-scaled bar chart */}
+      <div className="cozy-card p-6 space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CalendarDays size={18} className="text-maple-rust" />
@@ -228,38 +212,44 @@ export default function History() {
           )}
         </div>
 
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto select-none" style={{ minWidth: 560 }}>
-          {gridTicks.map((t) => (
-            <g key={`h-${t}`}>
-              <line x1={padL} y1={yFor(t)} x2={W - padR} y2={yFor(t)} stroke="var(--color-coffee-cream)" strokeOpacity={t === maxY ? 0.35 : 0.18} strokeWidth="1" />
-              <text x={padL - 8} y={yFor(t) + 3} textAnchor="end" fontSize="9" fill="var(--color-coffee-cream)">{formatMinutes(t)}</text>
-            </g>
-          ))}
+        <div className="flex items-end gap-4 sm:gap-6 h-48 px-1">
+          {weekBuckets.map((w, i) => {
+            const heightPct =
+              maxWeekMinutes > 0 ? Math.max(4, (w.minutes / maxWeekMinutes) * 100) : 4;
+
+            return (
+              <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group">
+                <span
+                  className={`font-label text-[0.6rem] mb-2 tabular-nums ${
+                    w.isCurrent ? 'text-maple-rust font-semibold' : 'text-coffee-cream'
+                  }`}
+                >
+                  {formatMinutes(w.minutes)}
+                </span>
+                <div
+                  title={`${w.label} — ${formatMinutes(w.minutes)}`}
+                  className={`w-full max-w-[52px] rounded-t-sm transition-all duration-500 ease-out ${
+                    w.isCurrent ? 'bg-gilmore-gold' : 'bg-maple-rust/75 group-hover:bg-maple-rust'
+                  }`}
+                  style={{ height: `${heightPct}%` }}
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-4 sm:gap-6 px-1 pt-3 border-t border-coffee-cream/20">
           {weekBuckets.map((w, i) => (
-            <g key={`v-${i}`}>
-              <line x1={xFor(i)} y1={padT} x2={xFor(i)} y2={H - padB} stroke="var(--color-coffee-cream)" strokeOpacity="0.15" strokeWidth="1" />
-              <text x={xFor(i)} y={H - padB + 18} textAnchor="middle" fontSize="9" fontWeight={w.isCurrent ? 'bold' : 'normal'} fill={w.isCurrent ? 'var(--color-maple-rust)' : 'var(--color-coffee-cream)'}>
-                {w.label}
-              </text>
-              <text x={xFor(i)} y={H - padB + 32} textAnchor="middle" fontSize="8" fontWeight={w.isCurrent ? 'bold' : 'normal'} fill={w.isCurrent ? 'var(--color-maple-rust)' : 'var(--color-porch-sage)'}>
-                {formatMinutes(w.minutes)}
-              </text>
-            </g>
+            <span
+              key={i}
+              className={`flex-1 text-center font-label text-[0.6rem] uppercase tracking-wider-label ${
+                w.isCurrent ? 'text-maple-rust font-semibold' : 'text-coffee-cream'
+              }`}
+            >
+              {w.label}
+            </span>
           ))}
-          <line x1={padL} y1={padT} x2={padL} y2={H - padB} stroke="var(--color-maple-rust)" strokeWidth="2" />
-          <line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="var(--color-maple-rust)" strokeWidth="2" />
-          <polyline
-            points={weekBuckets.map((w, i) => `${xFor(i)},${yFor(w.minutes)}`).join(' ')}
-            fill="none" stroke="var(--color-maple-rust)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-          />
-          {weekBuckets.map((w, i) => (
-            <circle key={`p-${i}`} cx={xFor(i)} cy={yFor(w.minutes)} r={w.isCurrent ? 5 : 4}
-              fill={w.isCurrent ? 'var(--color-gilmore-gold)' : 'var(--color-maple-rust)'}
-              stroke="var(--color-page-cream)" strokeWidth="1.5">
-              <title>{`Week ${i + 1} — ${formatMinutes(w.minutes)}`}</title>
-            </circle>
-          ))}
-        </svg>
+        </div>
       </div>
 
       {/* Lists: tasks done + books read */}

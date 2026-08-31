@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useFocusTimer } from '../context/FocusTimerContext';
 import DailyCoach from '../components/DailyCoach';
 import {
   Play, Plus, PenLine, Upload, ArrowRight, CheckCircle, Circle,
@@ -18,12 +19,18 @@ function getGreeting() {
 const keyOf = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-function formatLong(m) {
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
+// Real elapsed time, live — e.g. "0:45:12". Storage may hold fractional
+// minutes (see FocusTimerContext.done()); this formats seconds exactly.
+function formatHMS(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
 export default function Dashboard() {
   const { user, signOut } = useAuth();
+  const { isRunning, timeLeft, durationMin, completedAt } = useFocusTimer();
   const [tasks, setTasks] = useState([]);
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [goalHours, setGoalHours] = useState(6);
@@ -59,7 +66,9 @@ export default function Dashboard() {
     };
     loadData();
     return () => { mounted = false; };
-  }, [user, todayKey]);
+    // re-fetch whenever a focus session gets banked (Done/natural completion),
+    // even if we never left the Dashboard.
+  }, [user, todayKey, completedAt]);
 
   const toggleTask = async (task) => {
     const newStatus = task.status === 'done' ? 'todo' : 'done';
@@ -76,8 +85,13 @@ export default function Dashboard() {
     .sort((a, b) => a.due_date.localeCompare(b.due_date))
     .slice(0, 5);
 
+  // Live progress: banked minutes (from Supabase) + whatever's elapsed in
+  // the CURRENT running/paused session (from FocusTimerContext), so the
+  // ring and the time both move in real time — not just after "Done".
   const goalMinutes = goalHours * 60;
-  const pct = Math.min(1, goalMinutes ? todayMinutes / goalMinutes : 0);
+  const liveSeconds = timeLeft < durationMin * 60 ? durationMin * 60 - timeLeft : 0;
+  const totalSeconds = todayMinutes * 60 + liveSeconds;
+  const pct = Math.min(1, goalMinutes ? totalSeconds / (goalMinutes * 60) : 0);
   const R = 52;
   const C = 2 * Math.PI * R;
 
@@ -116,7 +130,15 @@ export default function Dashboard() {
         <div className="space-y-6">
           {/* Focus ring */}
           <div className="cozy-card p-6 flex flex-col items-center text-center space-y-3">
-            <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream">Today's Focus</p>
+            <div className="flex items-center gap-2">
+              <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream">Today's Focus</p>
+              {isRunning && (
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-maple-rust opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-maple-rust" />
+                </span>
+              )}
+            </div>
             <div className="relative">
               <svg viewBox="0 0 120 120" className="w-28 h-28">
                 <circle cx="60" cy="60" r={R} fill="none" stroke="var(--color-coffee-cream)" strokeOpacity="0.25" strokeWidth="10" />
@@ -132,14 +154,17 @@ export default function Dashboard() {
                 <span className="font-display text-xl text-yale-blue">{Math.round(pct * 100)}%</span>
               </div>
             </div>
-            <p className="font-body text-xs text-coffee-cream">
-              {formatLong(todayMinutes)} of {goalHours}h
-            </p>
+            <div>
+              <p className="font-display text-lg text-yale-blue tabular-nums leading-none">
+                {formatHMS(totalSeconds)}
+              </p>
+              <p className="font-body text-xs text-coffee-cream mt-1">of {goalHours}h goal</p>
+            </div>
             <Link
               to="/focus"
               className="flex items-center gap-2 bg-maple-rust text-page-cream px-5 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all"
             >
-              <Play size={14} /> Start Focus
+              <Play size={14} /> {isRunning ? 'Continue Focus' : 'Start Focus'}
             </Link>
           </div>
 

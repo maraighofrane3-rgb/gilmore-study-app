@@ -18,16 +18,22 @@ function formatHMS(totalSeconds) {
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-function formatMinutes(m) {
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  return rem ? `${h}h${rem.toString().padStart(2, '0')}` : `${h}h`;
+// Display-only rounding — storage keeps the exact fractional minutes,
+// this just decides how to show them (seconds for tiny durations,
+// whole minutes/hours otherwise) instead of a raw decimal like
+// "0.2333333333333325m".
+function formatMinutes(totalMin) {
+  const totalSeconds = Math.round(totalMin * 60);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+
+  if (h > 0) return m > 0 ? `${h}h${String(m).padStart(2, '0')}` : `${h}h`;
+  if (m > 0) return `${m}m`;
+  return `${s}s`;
 }
 
-// 📈 Line chart geometry
-const W = 700, H = 320;
-const padL = 46, padR = 16, padT = 16, padB = 52;
+// (chart geometry removed — now a simple auto-scaled bar chart, see below)
 
 export default function Focus() {
   const { user } = useAuth();
@@ -95,16 +101,7 @@ export default function Focus() {
   const totalSeconds = todayMinutes * 60 + liveSeconds;
   const percent = Math.min(100, Math.round((totalSeconds / (goalMinutes * 60)) * 100));
   const todayStr = new Date().toISOString().split('T')[0];
-
-   // 📈 Fixed Y axis: 0 → 23h45, thin gridline every 45 min
-  const MAX_Y = 23 * 60 + 45; // 23h45 in minutes
-  const GRID_STEP = 45;
-  const gridTicks = [];
-  for (let t = 0; t < MAX_Y; t += GRID_STEP) gridTicks.push(t);
-  gridTicks.push(MAX_Y); // top line exactly at 23h45
-
-  const xFor = (i) => padL + (i * (W - padL - padR)) / 6;
-  const yFor = (v) => H - padB - (Math.min(v, MAX_Y) / MAX_Y) * (H - padT - padB);
+  const maxDayMinutes = Math.max(0, ...weekDays.map((d) => d.minutes));
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
@@ -208,8 +205,8 @@ export default function Focus() {
         </button>
       </div>
 
-      {/* 📈 Weekly Progress — line chart (X: days, Y: time studied) */}
-      <div className="cozy-card p-6 space-y-4">
+      {/* 📊 Weekly Progress — bar chart, auto-scaled to this week's actual values */}
+      <div className="cozy-card p-6 space-y-6">
         <div className="flex items-center gap-4">
           <TrendingUp size={22} className="text-porch-sage" />
           <div>
@@ -218,86 +215,47 @@ export default function Focus() {
           </div>
         </div>
 
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto select-none">
-          {/* Horizontal grid + Y labels */}
-                   {/* Horizontal grid every 45m + Y labels every 3h (+ top 23h45) */}
-          {gridTicks.map((t) => {
-            const showLabel = t % 180 === 0 || t === MAX_Y;
+        <div className="flex items-end gap-3 sm:gap-5 h-48 px-1">
+          {weekDays.map((d) => {
+            const isToday = d.date === todayStr;
+            const heightPct =
+              maxDayMinutes > 0 ? Math.max(4, (d.minutes / maxDayMinutes) * 100) : 4;
+
             return (
-              <g key={`h-${t}`}>
-                <line
-                  x1={padL} y1={yFor(t)} x2={W - padR} y2={yFor(t)}
-                  stroke="var(--color-coffee-cream)"
-                  strokeOpacity={t === MAX_Y ? 0.35 : 0.18}
-                  strokeWidth="1"
+              <div key={d.date} className="flex-1 flex flex-col items-center justify-end h-full group">
+                <span
+                  className={`font-label text-[0.6rem] mb-2 tabular-nums ${
+                    isToday ? 'text-maple-rust font-semibold' : 'text-coffee-cream'
+                  }`}
+                >
+                  {formatMinutes(d.minutes)}
+                </span>
+                <div
+                  title={`${d.label} — ${formatMinutes(d.minutes)}`}
+                  className={`w-full max-w-[40px] rounded-t-sm transition-all duration-500 ease-out ${
+                    isToday
+                      ? 'bg-gilmore-gold'
+                      : 'bg-maple-rust/75 group-hover:bg-maple-rust'
+                  }`}
+                  style={{ height: `${heightPct}%` }}
                 />
-                {showLabel && (
-                  <text x={padL - 8} y={yFor(t) + 3} textAnchor="end" fontSize="9" fill="var(--color-coffee-cream)">
-                    {formatMinutes(t)}
-                  </text>
-                )}
-              </g>
+              </div>
             );
           })}
+        </div>
 
-          {/* Vertical grid + X labels (days) */}
-          {weekDays.map((d, i) => (
-            <g key={`v-${d.date}`}>
-              <line x1={xFor(i)} y1={padT} x2={xFor(i)} y2={H - padB} stroke="var(--color-coffee-cream)" strokeOpacity="0.25" strokeWidth="1" />
-                            <text
-                x={xFor(i)}
-                y={H - padB + 18}
-                textAnchor="middle"
-                fontSize="10"
-                fontWeight={d.date === todayStr ? 'bold' : 'normal'}
-                fill={d.date === todayStr ? 'var(--color-maple-rust)' : 'var(--color-coffee-cream)'}
-              >
-                {d.label}
-              </text>
-              <text
-                x={xFor(i)}
-                y={H - padB + 32}
-                textAnchor="middle"
-                fontSize="9"
-                fontWeight={d.date === todayStr ? 'bold' : 'normal'}
-                fill={d.date === todayStr ? 'var(--color-maple-rust)' : 'var(--color-porch-sage)'}
-              >
-                {formatMinutes(d.minutes)}
-              </text>
-            </g>
-          ))}
-
-          {/* Axes */}
-          <line x1={padL} y1={padT} x2={padL} y2={H - padB} stroke="var(--color-maple-rust)" strokeWidth="2" />
-          <line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="var(--color-maple-rust)" strokeWidth="2" />
-
-          {/* The line */}
-          {weekDays.length > 0 && (
-            <polyline
-              points={weekDays.map((d, i) => `${xFor(i)},${yFor(d.minutes)}`).join(' ')}
-              fill="none"
-              stroke="var(--color-maple-rust)"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
-
-          {/* Dots (today = gold & bigger) */}
-          {weekDays.map((d, i) => (
-            <circle
-              key={`p-${d.date}`}
-              cx={xFor(i)}
-              cy={yFor(d.minutes)}
-              r={d.date === todayStr ? 5.5 : 4}
-              fill={d.date === todayStr ? 'var(--color-gilmore-gold)' : 'var(--color-maple-rust)'}
-              stroke="var(--color-page-cream)"
-              strokeWidth="1.5"
+        <div className="flex gap-3 sm:gap-5 px-1 pt-3 border-t border-coffee-cream/20">
+          {weekDays.map((d) => (
+            <span
+              key={d.date}
+              className={`flex-1 text-center font-label text-[0.6rem] uppercase tracking-wider-label ${
+                d.date === todayStr ? 'text-maple-rust font-semibold' : 'text-coffee-cream'
+              }`}
             >
-              <title>{`${d.label} — ${formatMinutes(d.minutes)}`}</title>
-            </circle>
+              {d.label}
+            </span>
           ))}
-        </svg>
+        </div>
       </div>
     </div>
   );

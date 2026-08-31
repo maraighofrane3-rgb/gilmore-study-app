@@ -58,11 +58,13 @@ export function FocusTimerProvider({ children }) {
   const reset = () => { setIsRunning(false); setTimeLeft(durationMin * 60); };
   const changeDuration = (min) => { setDurationMin(min); setIsRunning(false); setTimeLeft(min * 60); };
 
-  // ✅ DONE: bank the ELAPSED time, even if the session isn't finished
+  // ✅ DONE: bank the EXACT elapsed time, even if the session isn't finished.
+  // No rounding, no forced minimum — whatever time really passed gets
+  // recorded, down to the second (as fractional minutes).
   const done = () => {
     const elapsedSeconds = durationMin * 60 - timeLeft;
     if (elapsedSeconds <= 0) return; // nothing studied yet
-    const minutes = Math.max(1, Math.round(elapsedSeconds / 60));
+    const minutes = elapsedSeconds / 60;
     setIsRunning(false);
     recordSession(minutes);
   };
