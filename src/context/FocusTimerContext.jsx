@@ -11,7 +11,9 @@ export function FocusTimerProvider({ children }) {
   const [timeLeft, setTimeLeft] = useState(25 * 60);
   const [isRunning, setIsRunning] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
+  const [selectedGoalId, setSelectedGoalId] = useState(null);
   const [completedAt, setCompletedAt] = useState(null);
+  const [saveError, setSaveError] = useState(null);
 
   // ⏱️ Tick (app-level, survives navigation)
   useEffect(() => {
@@ -22,13 +24,22 @@ export function FocusTimerProvider({ children }) {
 
   const recordSession = async (minutes) => {
     if (user) {
+      // NOTE: `goal_id` assumes a `goal_id` column on pomodoro_sessions
+      // (nullable uuid, references goals.id). Add it via migration if
+      // it doesn't exist yet — see the note in chat.
       const { error } = await supabase.from('pomodoro_sessions').insert([{
         user_id: user.id,
         task_id: selectedTaskId || null,
+        goal_id: selectedGoalId || null,
         duration: minutes,
         completed: true,
       }]);
-      if (error) console.error('Failed to record session:', error);
+      if (error) {
+        console.error('Failed to record session:', error);
+        setSaveError(error.message || 'Could not save your session.');
+      } else {
+        setSaveError(null);
+      }
     }
     setCompletedAt(new Date().toISOString());
     setTimeLeft(durationMin * 60);
@@ -71,8 +82,8 @@ export function FocusTimerProvider({ children }) {
 
   return (
     <FocusTimerContext.Provider value={{
-      durationMin, timeLeft, isRunning, selectedTaskId, completedAt,
-      setSelectedTaskId, start, pause, reset, changeDuration, done,
+      durationMin, timeLeft, isRunning, selectedTaskId, selectedGoalId, completedAt, saveError,
+      setSelectedTaskId, setSelectedGoalId, start, pause, reset, changeDuration, done,
     }}>
       {children}
     </FocusTimerContext.Provider>

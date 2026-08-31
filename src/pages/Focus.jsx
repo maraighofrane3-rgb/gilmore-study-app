@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useFocusTimer } from '../context/FocusTimerContext';
-import { Target, TrendingUp, BookOpen, Play, Pause, RotateCcw, CheckCircle  } from 'lucide-react';
+import { Target, TrendingUp, BookOpen, ListChecks, Play, Pause, RotateCcw, CheckCircle  } from 'lucide-react';
 
 const DURATIONS = [
   { label: '25m', min: 25 },
@@ -40,10 +40,14 @@ export default function Focus() {
   const {
   timeLeft, isRunning, durationMin,
   start, pause, reset, changeDuration,
-  selectedTaskId, setSelectedTaskId, completedAt, done,
+  selectedTaskId, setSelectedTaskId,
+  selectedGoalId, setSelectedGoalId,
+  completedAt, done,
 } = useFocusTimer();
 
   const [tasks, setTasks] = useState([]);
+  const [goals, setGoals] = useState([]);
+  const [focusMode, setFocusMode] = useState('task'); // 'task' | 'goal'
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [weekMinutes, setWeekMinutes] = useState(0);
   const [weekDays, setWeekDays] = useState([]);
@@ -59,14 +63,16 @@ export default function Focus() {
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
     const mondayISO = monday.toISOString().split('T')[0];
 
-    const [tasksRes, todayRes, weekRes, profileRes] = await Promise.all([
+    const [tasksRes, goalsRes, todayRes, weekRes, profileRes] = await Promise.all([
       supabase.from('tasks').select('id, title').eq('user_id', user.id).eq('status', 'todo'),
+      supabase.from('goals').select('id, title').eq('user_id', user.id).eq('status', 'active'),
       supabase.from('pomodoro_sessions').select('duration').eq('user_id', user.id).eq('completed', true).gte('created_at', `${today}T00:00:00`),
       supabase.from('pomodoro_sessions').select('duration, created_at').eq('user_id', user.id).eq('completed', true).gte('created_at', `${mondayISO}T00:00:00`),
       supabase.from('profiles').select('daily_goal_hours').eq('id', user.id).maybeSingle(),
     ]);
 
     setTasks(tasksRes.data || []);
+    setGoals(goalsRes.data || []);
     setTodayMinutes((todayRes.data || []).reduce((s, r) => s + (r.duration || 0), 0));
     setWeekMinutes((weekRes.data || []).reduce((s, r) => s + (r.duration || 0), 0));
     if (profileRes.data?.daily_goal_hours) setDailyGoal(profileRes.data.daily_goal_hours);
@@ -132,18 +138,61 @@ export default function Focus() {
         </div>
       </div>
 
-      {/* Task selector */}
-      <div className="max-w-xl mx-auto">
-        <div className="flex items-center gap-2 bg-page-cream border border-coffee-cream/20 rounded-sm px-4 py-3">
-          <BookOpen size={18} className="text-coffee-cream" />
-          <select
-            value={selectedTaskId || ''}
-            onChange={(e) => setSelectedTaskId(e.target.value || null)}
-            className="flex-1 bg-transparent focus:outline-none font-body text-sm text-library-ink"
+      {/* Focus target: task or goal */}
+      <div className="max-w-xl mx-auto space-y-2">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setFocusMode('task')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-sm font-label text-xs uppercase tracking-wider border transition-colors ${
+              focusMode === 'task'
+                ? 'bg-yale-blue text-page-cream border-yale-blue'
+                : 'border-coffee-cream/30 text-coffee-cream hover:border-maple-rust hover:text-maple-rust'
+            }`}
           >
-            <option value="">Select a task (optional)...</option>
-            {tasks.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
-          </select>
+            <ListChecks size={14} /> Task
+          </button>
+          <button
+            onClick={() => setFocusMode('goal')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-sm font-label text-xs uppercase tracking-wider border transition-colors ${
+              focusMode === 'goal'
+                ? 'bg-yale-blue text-page-cream border-yale-blue'
+                : 'border-coffee-cream/30 text-coffee-cream hover:border-maple-rust hover:text-maple-rust'
+            }`}
+          >
+            <Target size={14} /> Goal
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 bg-page-cream border border-coffee-cream/20 rounded-sm px-4 py-3">
+          {focusMode === 'task' ? (
+            <>
+              <BookOpen size={18} className="text-coffee-cream shrink-0" />
+              <select
+                value={selectedTaskId || ''}
+                onChange={(e) => setSelectedTaskId(e.target.value || null)}
+                className="flex-1 bg-transparent focus:outline-none font-body text-sm text-library-ink"
+              >
+                <option value="">Select a task (optional)...</option>
+                {tasks.map((t) => (
+                  <option key={t.id} value={t.id}>{t.title}</option>
+                ))}
+              </select>
+            </>
+          ) : (
+            <>
+              <Target size={18} className="text-coffee-cream shrink-0" />
+              <select
+                value={selectedGoalId || ''}
+                onChange={(e) => setSelectedGoalId(e.target.value || null)}
+                className="flex-1 bg-transparent focus:outline-none font-body text-sm text-library-ink"
+              >
+                <option value="">Select a goal (optional)...</option>
+                {goals.map((g) => (
+                  <option key={g.id} value={g.id}>{g.title}</option>
+                ))}
+              </select>
+            </>
+          )}
         </div>
       </div>
 
