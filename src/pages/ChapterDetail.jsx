@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useParams, Link } from 'react-router-dom';
-import { extractTextFromPDF } from '../utils/pdfWorker';
+import { extractTextFromPDF, renderPDFAsImages } from '../utils/pdfWorker';
 import {
   ArrowLeft, Loader2, Sparkles, FileText, Lightbulb, List, X,
   Save, CheckCircle, ChevronDown, Upload, FileText as FileIcon,
@@ -20,7 +20,6 @@ export default function ChapterDetail() {
   const [uploadingPDF, setUploadingPDF] = useState(false);
   const fileInputRef = useRef(null);
 
-  // ✏️ Edit mode
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editContent, setEditContent] = useState('');
@@ -36,7 +35,6 @@ export default function ChapterDetail() {
   const [expandedNote, setExpandedNote] = useState(null);
   const notesSectionRef = useRef(null);
 
-  // 🗒️ Manual note form
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [noteFormTitle, setNoteFormTitle] = useState('');
   const [noteFormText, setNoteFormText] = useState('');
@@ -50,6 +48,12 @@ export default function ChapterDetail() {
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
   useEffect(() => {
+    if (materialId && chapterId) {
+      fetchAll();
+    }
+  }, [materialId, chapterId]);
+
+  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
@@ -60,7 +64,6 @@ export default function ChapterDetail() {
     }
   }, [notification.show]);
 
-   // 📖 Remember the last opened chapter for the Dashboard "Resume" card
   useEffect(() => {
     if (chapter) {
       localStorage.setItem('rgw-last-chapter', JSON.stringify({
@@ -87,37 +90,56 @@ export default function ChapterDetail() {
     setLoading(false);
   };
 
-  // ✅ PDF upload now APPENDS content (you can add as many PDFs as you want)
-  const handlePDFUpload = async (e) => {
+    const handlePDFUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || file.type !== 'application/pdf') return;
 
     setUploadingPDF(true);
     try {
-      const text = await extractTextFromPDF(file);
-      const divider = `\n\n──────────────────────────\n📄 ${file.name} · added ${new Date().toLocaleDateString()}\n──────────────────────────\n\n`;
-      const newContent = (chapter.content ? chapter.content + divider : '') + text;
+      // 1. Extract raw text FOR THE AI
+      const extractedText = await extractTextFromPDF(file);
 
+      // 2. Generate HTML with images FOR DISPLAY
+      const htmlContent = await renderPDFAsImages(file);
+
+      const divider = `\n\n<div class="pdf-divider" style="text-align: center; margin: 2rem 0; color: #8b5e3c; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; border-top: 1px solid #d4c5b5; border-bottom: 1px solid #d4c5b5; padding: 1rem 0;">📄 ${file.name} · added on ${new Date().toLocaleDateString()}</div>\n\n`;
+
+      const newContent = (chapter.content ? chapter.content + divider : '') + htmlContent;
+
+      // 3. Save into two separate columns!
       const { error } = await supabase
         .from('chapters')
-        .update({ content: newContent, is_from_pdf: true })
+        .update({
+          content: newContent,          // For display (Images/HTML)
+          ai_text_content: extractedText, // For the AI (clean raw text)
+          is_from_pdf: true
+        })
         .eq('id', chapterId);
 
       if (error) throw error;
-      setChapter({ ...chapter, content: newContent, is_from_pdf: true });
-      showNotification(`PDF added! Extracted ${text.length} characters.`);
+
+      setChapter({
+        ...chapter,
+        content: newContent,
+        ai_text_content: extractedText, // Update local state
+        is_from_pdf: true
+      });
+
+      showNotification(`PDF added successfully! (Text isolated for AI)`);
     } catch (err) {
       console.error('PDF upload error:', err);
-      showNotification(`Failed to process PDF: ${err.message}`, 'error');
+      showNotification(`PDF processing failed: ${err.message}`, 'error');
     }
     setUploadingPDF(false);
     e.target.value = '';
   };
 
-  // ✏️ Edit chapter
   const startEdit = () => {
     setEditTitle(chapter.title);
-    setEditContent(chapter.content || '');
+    const plainText = chapter.content && chapter.content.includes('<img')
+      ? '[PDF content with images - Direct editing may remove the images. Use "Add PDF" to add pages.]'
+      : (chapter.content || '');
+    setEditContent(plainText);
     setEditing(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -131,7 +153,7 @@ export default function ChapterDetail() {
     setSavingEdit(false);
 
     if (error) {
-      showNotification('Failed to save changes.', 'error');
+      showNotification('Save failed.', 'error');
       return;
     }
     setChapter({ ...chapter, title: editTitle.trim() || 'Untitled', content: editContent });
@@ -139,8 +161,10 @@ export default function ChapterDetail() {
     showNotification('Chapter updated!');
   };
 
-  const handleAnalyze = async (action) => {
-    if (!chapter || !chapter.content) return;
+    const handleAnalyze = async (action) => {
+    // Use ai_text_content first, otherwise fall back to content (for manual chapters)
+    const rawText = chapter.ai_text_content || chapter.content;
+    if (!chapter || !rawText) return;
 
     setAnalyzing(true);
     setActiveAction(action);
@@ -149,11 +173,13 @@ export default function ChapterDetail() {
     setNoteTitle('');
 
     try {
-      const textToSend = chapter.content.substring(0, 2500);
+      // No more regex needed! Just take the first 4000 characters of the clean text
+      const textToSend = rawText.substring(0, 4000);
+
       let systemPrompt = '';
-      if (action === 'summarize') systemPrompt = 'Provide a concise, clear summary of this study material. Focus on the main concepts and key takeaways in 2-3 paragraphs.';
-      else if (action === 'explain') systemPrompt = 'Explain this content in simple, clear terms, breaking down any complex concepts or jargon.';
-      else if (action === 'keypoints') systemPrompt = 'Extract the 5-7 most important key points. Return as a bulleted list.';
+      if (action === 'summarize') systemPrompt = 'Write a clear, concise summary of this study content. Focus on the main concepts and key points in 2-3 paragraphs.';
+      else if (action === 'explain') systemPrompt = 'Explain this content in simple, clear terms, breaking down complex concepts or jargon.';
+      else if (action === 'keypoints') systemPrompt = 'Extract the 5 to 7 most important points. Present them as a bulleted list.';
 
       const { data, error } = await supabase.functions.invoke('summarize-text', {
         body: { text: textToSend, action, custom_prompt: systemPrompt },
@@ -164,7 +190,7 @@ export default function ChapterDetail() {
       showNotification('Analysis complete!');
     } catch (err) {
       console.error('Analysis error:', err);
-      showNotification(`Failed to analyze: ${err.message}`, 'error');
+      showNotification(`Analysis failed: ${err.message}`, 'error');
     }
     setAnalyzing(false);
   };
@@ -179,15 +205,18 @@ export default function ChapterDetail() {
     setIsAsking(true);
 
     try {
-      const context = chapter.content.substring(0, 6000);
+      // Same clean logic for the Q&A chat
+      const rawText = chapter.ai_text_content || chapter.content;
+      const context = rawText.substring(0, 6000); // 6000 chars is plenty for question context
+
       const { data, error } = await supabase.functions.invoke('ask-chapter', {
         body: { question: userQuestion, context },
       });
       if (error) throw error;
       setChatMessages(prev => [...prev, { role: 'assistant', content: data.answer }]);
     } catch (err) {
-      console.error('Q&A Error:', err);
-      setChatMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I couldn't process that question. Please try again." }]);
+      console.error('Q&A error:', err);
+      setChatMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I couldn't process that question." }]);
     }
     setIsAsking(false);
   };
@@ -229,7 +258,6 @@ export default function ChapterDetail() {
     }
   };
 
-  // 🗒️ Manual note
   const handleAddManualNote = async (e) => {
     e.preventDefault();
     if (!noteFormText.trim() || !chapter) return;
@@ -262,6 +290,21 @@ export default function ChapterDetail() {
     showNotification('Note deleted.');
   };
 
+  const renderContent = (content) => {
+    if (!content) return 'No content yet. Import a PDF or click Edit to write something.';
+
+    if (content.includes('<img') || content.includes('<div class="pdf-pages"') || content.includes('<div class="pdf-divider"')) {
+      return (
+        <div
+          dangerouslySetInnerHTML={{ __html: content }}
+          className="font-body text-library-ink leading-relaxed text-sm max-h-[80vh] overflow-y-auto pr-2 space-y-4"
+        />
+      );
+    }
+
+    return <div className="font-body text-library-ink whitespace-pre-wrap leading-relaxed text-sm max-h-96 overflow-y-auto">{content}</div>;
+  };
+
   if (loading) {
     return (
       <div className="max-w-5xl mx-auto py-20 text-center">
@@ -276,7 +319,7 @@ export default function ChapterDetail() {
       <div className="max-w-5xl mx-auto py-20 text-center">
         <p className="font-body text-coffee-cream italic">Chapter not found.</p>
         <Link to={`/study-materials/${materialId}`} className="inline-block mt-4 text-maple-rust hover:underline font-label text-xs uppercase tracking-wider">
-          ← Back to Material
+          ← Back to material
         </Link>
       </div>
     );
@@ -284,7 +327,6 @@ export default function ChapterDetail() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-fade-in-up">
-      {/* Notification */}
       {notification.show && (
         <div className={`fixed top-6 right-6 z-50 px-6 py-4 rounded-sm shadow-cozy border animate-fade-in-up flex items-center gap-3 ${
           notification.type === 'error' ? 'bg-maple-rust text-page-cream border-maple-rust' : 'bg-porch-sage text-page-cream border-porch-sage'
@@ -294,14 +336,12 @@ export default function ChapterDetail() {
         </div>
       )}
 
-      {/* Breadcrumb */}
       <div className="flex items-center gap-4">
         <Link to={`/study-materials/${materialId}`} className="flex items-center gap-2 text-coffee-cream hover:text-maple-rust transition-colors">
           <ArrowLeft size={20} /> Back to {material?.title || 'Material'}
         </Link>
       </div>
 
-      {/* Chapter Header + actions */}
       <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
@@ -332,7 +372,6 @@ export default function ChapterDetail() {
         </div>
       </div>
 
-      {/* ✏️ Edit mode OR content */}
       {editing ? (
         <div className="bg-parchment p-6 rounded-sm border border-maple-rust/40 shadow-cozy space-y-4">
           <h3 className="font-display text-lg text-yale-blue flex items-center gap-2">
@@ -348,7 +387,7 @@ export default function ChapterDetail() {
             />
           </div>
           <div>
-            <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-1">Content (add, remove or modify anything)</label>
+            <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-1">Content</label>
             <textarea
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
@@ -367,15 +406,25 @@ export default function ChapterDetail() {
               disabled={savingEdit}
               className="flex items-center gap-2 bg-porch-sage text-page-cream px-5 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50"
             >
-              {savingEdit ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save Changes
+              {savingEdit ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
             </button>
           </div>
         </div>
       ) : (
         <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy">
-          <div className="font-body text-library-ink whitespace-pre-wrap leading-relaxed text-sm max-h-96 overflow-y-auto">
-            {chapter.content || 'No content yet. Upload a PDF or click Edit to write your own content.'}
-          </div>
+          {chapter.pdf_url ? (
+            <div className="w-full h-[800px] rounded-sm overflow-hidden border border-coffee-cream/20 bg-white">
+              <iframe
+                src={chapter.pdf_url}
+                className="w-full h-full"
+                title={chapter.title}
+              />
+            </div>
+          ) : (
+            <div className="font-body text-library-ink leading-relaxed text-sm max-h-[80vh] overflow-y-auto pr-2">
+              {renderContent(chapter.content)}
+            </div>
+          )}
         </div>
       )}
 
@@ -405,12 +454,12 @@ export default function ChapterDetail() {
               <p className="font-body text-sm text-library-ink whitespace-pre-wrap leading-relaxed pr-6">{chapterResult}</p>
             </div>
             <div>
-              <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-1">Note Title (optional)</label>
-              <input type="text" value={noteTitle} onChange={(e) => setNoteTitle(e.target.value)} placeholder="e.g., Chapter 1 Summary..." className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm" />
+              <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-1">Note title (optional)</label>
+              <input type="text" value={noteTitle} onChange={(e) => setNoteTitle(e.target.value)} placeholder="e.g. Chapter 1 Summary..." className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm" />
             </div>
             <div className="flex justify-end">
               <button onClick={handleSaveNote} disabled={justSaved} className={`flex items-center gap-2 px-5 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider transition-all duration-300 ${justSaved ? 'bg-porch-sage text-page-cream cursor-default' : 'bg-maple-rust text-page-cream hover:bg-yale-blue'}`}>
-                {justSaved ? <><CheckCircle size={14} /> Saved!</> : <><Save size={14} /> Save to Notes</>}
+                {justSaved ? <><CheckCircle size={14} /> Saved!</> : <><Save size={14} /> Save to notes</>}
               </button>
             </div>
           </div>
@@ -421,7 +470,7 @@ export default function ChapterDetail() {
       <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
         <div className="flex items-center gap-2 mb-2">
           <MessageCircle size={18} className="text-maple-rust" />
-          <h3 className="font-display text-lg text-yale-blue">Ask Questions About This Chapter</h3>
+          <h3 className="font-display text-lg text-yale-blue">Ask questions about this chapter</h3>
         </div>
 
         <div className="bg-page-cream/50 rounded-sm border border-coffee-cream/20 h-64 overflow-y-auto p-4 space-y-3">
@@ -456,7 +505,7 @@ export default function ChapterDetail() {
             type="text"
             value={questionInput}
             onChange={(e) => setQuestionInput(e.target.value)}
-            placeholder="e.g., What is the main cause of...?"
+            placeholder="e.g. What is the main cause of...?"
             disabled={isAsking}
             className="flex-1 p-3 bg-page-cream border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm disabled:opacity-50"
           />
@@ -466,7 +515,7 @@ export default function ChapterDetail() {
         </form>
       </div>
 
-      {/* 🗒️ Notes — always visible, with manual Add Note */}
+      {/* Notes */}
       <div ref={notesSectionRef} className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
         <div className="flex items-center justify-between">
           <h4 className="font-display text-lg text-yale-blue flex items-center gap-2">
@@ -476,7 +525,7 @@ export default function ChapterDetail() {
             onClick={() => setShowNoteForm(!showNoteForm)}
             className="flex items-center gap-1 bg-porch-sage text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all"
           >
-            <Plus size={14} /> Add Note
+            <Plus size={14} /> Add a note
           </button>
         </div>
 
@@ -501,7 +550,7 @@ export default function ChapterDetail() {
                 Cancel
               </button>
               <button type="submit" disabled={savingNote} className="flex items-center gap-2 bg-maple-rust text-page-cream px-4 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50">
-                {savingNote ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save Note
+                {savingNote ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
               </button>
             </div>
           </form>

@@ -55,7 +55,7 @@ function App() {
             <Route path="study-materials" element={<StudyMaterials />} />
             <Route path="study-materials/:materialId" element={<StudyMaterials />} />
             {/* ✅ Déjà protégé par le Layout parent, pas besoin de ProtectedRoute ici */}
-            <Route path="study-materials/:materialId/chapters/:chapterId" element={<ChapterDetail />} />
+          <Route path="study-materials/:materialId/chapter/:chapterId" element={<ChapterDetail />} />
             <Route path="history" element={<History />} />
           </Route>
         </Routes>

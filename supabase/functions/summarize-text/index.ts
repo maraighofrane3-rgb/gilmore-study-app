@@ -7,6 +7,7 @@ const corsHeaders = {
 }
 
 serve(async (req) => {
+  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -15,7 +16,10 @@ serve(async (req) => {
     const { text, action, custom_prompt } = await req.json()
     const apiKey = Deno.env.get('GROQ_API_KEY')
 
-    if (!apiKey) throw new Error('GROQ_API_KEY is missing in Supabase Secrets.')
+    if (!apiKey) {
+      throw new Error('GROQ_API_KEY is missing in Supabase Secrets.')
+    }
+    
     if (!text || text.trim().length === 0) {
       return new Response(JSON.stringify({ error: 'No text provided.' }), {
         status: 400,
@@ -23,8 +27,17 @@ serve(async (req) => {
       })
     }
 
-    const systemPrompt = custom_prompt || "Analyze the following text."
+    // ✅ Smart prompt selection based on the action
+    let systemPrompt = custom_prompt || "Analyze the following text."
+    if (action === 'summarize') {
+      systemPrompt = "Provide a concise, clear summary of this study material. Focus on the main concepts and key takeaways in 2-3 paragraphs."
+    } else if (action === 'explain') {
+      systemPrompt = "Explain this content in simple, clear terms, breaking down any complex concepts or jargon."
+    } else if (action === 'keypoints') {
+      systemPrompt = "Extract the 5-7 most important key points. Return as a bulleted list."
+    }
 
+    // ✅ Call Groq API with a 100% reliable, free-tier model
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -32,7 +45,7 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-oss-120b',
+        model: 'llama-3.1-8b-instant', // ✅ Changed to a proven, ultra-reliable Groq model
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: text }

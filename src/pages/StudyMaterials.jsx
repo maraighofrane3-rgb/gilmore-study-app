@@ -9,6 +9,7 @@ import {
   Save, CheckCircle, ChevronDown, Upload, FileText as FileIcon,
   MessageCircle, Send
 } from 'lucide-react';
+import { renderPDFAsImages } from '../utils/pdfWorker';
 
 export default function StudyMaterials() {
   const { materialId } = useParams();
@@ -18,7 +19,6 @@ export default function StudyMaterials() {
   const [materials, setMaterials] = useState([]);
   const [selectedMaterial, setSelectedMaterial] = useState(null);
   const [chapters, setChapters] = useState([]);
-  const [selectedChapter, setSelectedChapter] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showMaterialForm, setShowMaterialForm] = useState(false);
   const [showChapterForm, setShowChapterForm] = useState(false);
@@ -30,26 +30,8 @@ export default function StudyMaterials() {
   
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
-  const [analyzing, setAnalyzing] = useState(false);
-  const [activeAction, setActiveAction] = useState(null);
-  const [chapterResult, setChapterResult] = useState('');
-  const [justSaved, setJustSaved] = useState(false);
-  const [savedNotes, setSavedNotes] = useState([]);
-  const [expandedNote, setExpandedNote] = useState(null);
-  const [noteTitle, setNoteTitle] = useState('');
-
-  const [chatMessages, setChatMessages] = useState([]);
-  const [questionInput, setQuestionInput] = useState('');
-  const [isAsking, setIsAsking] = useState(false);
-  const chatEndRef = useRef(null);
-  const notesSectionRef = useRef(null);
-
   const [newMaterial, setNewMaterial] = useState({ title: '', description: '' });
   const [newChapter, setNewChapter] = useState({ title: '', content: '' });
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
 
   useEffect(() => {
     if (notification.show) {
@@ -74,17 +56,8 @@ export default function StudyMaterials() {
     } else if (!materialId) {
       setSelectedMaterial(null);
       setChapters([]);
-      setSelectedChapter(null);
     }
   }, [materialId, materials]);
-
-  useEffect(() => {
-    if (selectedChapter) {
-      fetchChapterNotes();
-      setChatMessages([]);
-      setQuestionInput('');
-    }
-  }, [selectedChapter]);
 
   const fetchMaterials = async () => {
     setLoading(true);
@@ -108,17 +81,6 @@ export default function StudyMaterials() {
     if (!error) setChapters(data || []);
   };
 
-  const fetchChapterNotes = async () => {
-    if (!selectedChapter) return;
-    const { data, error } = await supabase
-      .from('chapter_notes')
-      .select('*')
-      .eq('chapter_id', selectedChapter.id)
-      .order('created_at', { ascending: false });
-    
-    if (!error) setSavedNotes(data || []);
-  };
-
   const showNotification = (message, type = 'success') => {
     setNotification({ show: true, message, type });
   };
@@ -131,41 +93,68 @@ export default function StudyMaterials() {
     }
   };
 
-  const handlePDFSubmit = async (e) => {
-    e.preventDefault();
-    if (!pdfFile) return;
 
-    setUploadingPDF(true);
-    try {
-      const extractedText = await extractTextFromPDF(pdfFile);
-      
-      const { data, error } = await supabase
-        .from('chapters')
-        .insert([{ 
-          user_id: user.id, 
-          material_id: selectedMaterial.id, 
-          title: pdfTitle.trim() || 'Untitled Chapter',
-          content: extractedText,
-          is_from_pdf: true
-        }])
-        .select()
-        .single();
+// ... inside the component ...
 
-      if (error) throw error;
-      
-      setChapters([data, ...chapters]);
-      setShowPDFUpload(false);
-      setPdfFile(null);
-      setPdfTitle('');
-      
-      showNotification(`PDF imported successfully! Extracted ${extractedText.length} characters.`);
-      navigate(`/study-materials/${selectedMaterial.id}/chapters/${data.id}`);
-    } catch (err) {
-      console.error('PDF upload error:', err);
-      showNotification(`Failed to process PDF: ${err.message}`, 'error');
-    }
-    setUploadingPDF(false);
-  };
+// In StudyMaterials.jsx, update handlePDFSubmit:
+ const handlePDFSubmit = async (e) => {
+  e.preventDefault();
+  if (!pdfFile) return;
+
+  setUploadingPDF(true);
+  try {
+    // 1. Extract text for AI analysis
+    const extractedText = await extractTextFromPDF(pdfFile);
+    
+    // 2. Upload PDF to Supabase Storage for viewing
+    const fileExt = pdfFile.name.split('.').pop();
+    const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+    
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('pdf-documents')
+      .upload(fileName, pdfFile, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (uploadError) throw uploadError;
+
+    // 3. Get the public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('pdf-documents')
+      .getPublicUrl(fileName);
+
+    // 4. Save BOTH the PDF viewer AND the extracted text
+    const { data, error } = await supabase
+      .from('chapters')
+      .insert([{ 
+        user_id: user.id, 
+        material_id: selectedMaterial.id, 
+        title: pdfTitle.trim() || 'Untitled Chapter',
+        content: extractedText, // ✅ Text for AI analysis
+        pdf_url: publicUrl,     // ✅ PDF for viewing
+        file_path: fileName,
+        is_from_pdf: true,
+        has_images: true
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    setChapters([data, ...chapters]);
+    setShowPDFUpload(false);
+    setPdfFile(null);
+    setPdfTitle('');
+    
+    showNotification(`PDF uploaded successfully! Text extracted for AI analysis.`);
+    navigate(`/study-materials/${selectedMaterial.id}/chapter/${data.id}`);
+  } catch (err) {
+    console.error('PDF upload error:', err);
+    showNotification(`Failed to upload PDF: ${err.message}`, 'error');
+  }
+  setUploadingPDF(false);
+};
 
   const handleAddMaterial = async (e) => {
     e.preventDefault();
@@ -203,113 +192,10 @@ export default function StudyMaterials() {
       setNewChapter({ title: '', content: '' });
       setShowChapterForm(false);
       showNotification('Chapter added successfully!');
-      navigate(`/study-materials/${selectedMaterial.id}/chapters/${data.id}`);
+      // Fixed URL: 'chapter' instead of 'chapters'
+      navigate(`/study-materials/${selectedMaterial.id}/chapter/${data.id}`);
     } else {
       showNotification('Failed to add chapter.', 'error');
-    }
-  };
-
-  const handleAnalyze = async (action) => {
-    if (!selectedChapter || !selectedChapter.content) return;
-    
-    setAnalyzing(true);
-    setActiveAction(action);
-    setChapterResult('');
-    setJustSaved(false);
-    setNoteTitle('');
-
-    try {
-      const textToSend = selectedChapter.content.substring(0, 2500);
-
-      let systemPrompt = "";
-      if (action === 'summarize') {
-        systemPrompt = "Provide a concise, clear summary of this study material. Focus on the main concepts and key takeaways in 2-3 paragraphs.";
-      } else if (action === 'explain') {
-        systemPrompt = "Explain this content in simple, clear terms, breaking down any complex concepts or jargon.";
-      } else if (action === 'keypoints') {
-        systemPrompt = "Extract the 5-7 most important key points. Return as a bulleted list.";
-      }
-
-      const { data, error } = await supabase.functions.invoke('summarize-text', {
-        body: { 
-          text: textToSend, 
-          action: action,
-          custom_prompt: systemPrompt
-        }
-      });
-
-      if (error) throw new Error(error.message || 'Failed to analyze');
-
-      setChapterResult(data.result);
-      showNotification('Analysis complete!');
-    } catch (err) {
-      console.error('Analysis error:', err);
-      showNotification(`Failed to analyze: ${err.message}`, 'error');
-    }
-    setAnalyzing(false);
-  };
-
-  const handleAskQuestion = async (e) => {
-    e.preventDefault();
-    if (!questionInput.trim() || !selectedChapter) return;
-
-    const userQuestion = questionInput.trim();
-    setQuestionInput('');
-    setChatMessages(prev => [...prev, { role: 'user', content: userQuestion }]);
-    setIsAsking(true);
-
-    try {
-      const context = selectedChapter.content.substring(0, 6000);
-      
-      const { data, error } = await supabase.functions.invoke('ask-chapter', {
-        body: { question: userQuestion, context: context }
-      });
-
-      if (error) throw error;
-
-      setChatMessages(prev => [...prev, { role: 'assistant', content: data.answer }]);
-    } catch (err) {
-      console.error('Q&A Error:', err);
-      setChatMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I couldn't process that question. Please try again." }]);
-      showNotification('Failed to get answer.', 'error');
-    }
-    setIsAsking(false);
-  };
-
-  const handleSaveNote = async () => {
-    if (!chapterResult || !selectedChapter || !activeAction) return;
-
-    const finalTitle = noteTitle.trim() || `${activeAction.charAt(0).toUpperCase() + activeAction.slice(1)} - ${new Date().toLocaleDateString()}`;
-
-    try {
-      const noteData = {
-        user_id: user.id,
-        chapter_id: selectedChapter.id,
-        title: finalTitle,
-        original_text: selectedChapter.content,
-      };
-
-      if (activeAction === 'summarize') noteData.ai_summary = chapterResult;
-      else if (activeAction === 'explain') noteData.ai_explanation = chapterResult;
-      else if (activeAction === 'keypoints') noteData.ai_key_points = chapterResult.split('\n').filter(line => line.trim());
-
-      const { error } = await supabase.from('chapter_notes').insert([noteData]);
-      if (error) throw error;
-
-      setJustSaved(true);
-      await fetchChapterNotes();
-      showNotification('Note saved successfully!');
-      
-      setTimeout(() => {
-        notesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        setJustSaved(false);
-        setChapterResult('');
-        setNoteTitle('');
-        setActiveAction(null);
-      }, 1500);
-    } catch (err) {
-      console.error('Save error:', err);
-      showNotification('Failed to save note.', 'error');
     }
   };
 
@@ -320,7 +206,6 @@ export default function StudyMaterials() {
       navigate('/study-materials');
       setSelectedMaterial(null);
       setChapters([]);
-      setSelectedChapter(null);
     }
     showNotification('Material deleted.');
   };
@@ -328,21 +213,13 @@ export default function StudyMaterials() {
   const deleteChapter = async (id) => {
     await supabase.from('chapters').delete().eq('id', id);
     setChapters(chapters.filter(c => c.id !== id));
-    if (selectedChapter?.id === id) setSelectedChapter(null);
     showNotification('Chapter deleted.');
-  };
-
-  const deleteNote = async (id) => {
-    await supabase.from('chapter_notes').delete().eq('id', id);
-    setSavedNotes(savedNotes.filter(n => n.id !== id));
-    showNotification('Note deleted.');
   };
 
   const handleBack = () => {
     navigate('/study-materials');
     setSelectedMaterial(null);
     setChapters([]);
-    setSelectedChapter(null);
   };
 
   if (loading) {
@@ -468,7 +345,8 @@ export default function StudyMaterials() {
                 <p className="text-center text-coffee-cream italic py-4 text-sm">No chapters yet.</p>
               ) : (
                 chapters.map((chapter) => (
-                  <div key={chapter.id} onClick={() =>  navigate(`/study-materials/${selectedMaterial.id}/chapters/${chapter.id}`)} className={`p-4 rounded-sm border cursor-pointer transition-all group ${selectedChapter?.id === chapter.id ? 'bg-page-cream border-maple-rust shadow-cozy' : 'bg-parchment border-coffee-cream/20 hover:border-coffee-cream/50'}`}>
+                  // ✅ FIXED: Changed 'chapters' to 'chapter' in the URL below
+                  <div key={chapter.id} onClick={() => navigate(`/study-materials/${selectedMaterial.id}/chapter/${chapter.id}`)} className={`p-4 rounded-sm border cursor-pointer transition-all group ${selectedMaterial?.id === chapter.id ? 'bg-page-cream border-maple-rust shadow-cozy' : 'bg-parchment border-coffee-cream/20 hover:border-coffee-cream/50'}`}>
                     <div className="flex justify-between items-start">
                       <div>
                         <div className="flex items-center gap-2">
@@ -485,205 +363,12 @@ export default function StudyMaterials() {
             </div>
           </div>
 
-          <div className="lg:col-span-2 space-y-6">
-            {selectedChapter ? (
-              <>
-                {/* Chapter Content */}
-                <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy">
-                  <div className="flex items-center gap-2 mb-4">
-                    <h2 className="font-display text-xl text-yale-blue">{selectedChapter.title}</h2>
-                    {selectedChapter.is_from_pdf && <span className="text-[0.6rem] bg-maple-rust/20 text-maple-rust px-2 py-1 rounded-sm font-label uppercase">PDF Import</span>}
-                  </div>
-                  <div className="font-body text-library-ink whitespace-pre-wrap leading-relaxed text-sm max-h-96 overflow-y-auto">
-                    {selectedChapter.content}
-                  </div>
-                </div>
-
-                {/* AI Study Assistant */}
-                <div className="bg-page-cream p-6 rounded-sm border-l-4 border-gilmore-gold shadow-cozy space-y-4">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Sparkles size={18} className="text-gilmore-gold" />
-                    <h3 className="font-display text-lg text-yale-blue">AI Study Assistant</h3>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={() => handleAnalyze('summarize')} disabled={analyzing || !selectedChapter.content} className="flex items-center gap-2 bg-yale-blue text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
-                      {analyzing && activeAction === 'summarize' ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />} Summarize
-                    </button>
-                    <button onClick={() => handleAnalyze('explain')} disabled={analyzing || !selectedChapter.content} className="flex items-center gap-2 bg-porch-sage text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
-                      {analyzing && activeAction === 'explain' ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />} Explain Simply
-                    </button>
-                    <button onClick={() => handleAnalyze('keypoints')} disabled={analyzing || !selectedChapter.content} className="flex items-center gap-2 bg-gilmore-gold text-yale-blue px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust hover:text-page-cream transition-all disabled:opacity-50">
-                      {analyzing && activeAction === 'keypoints' ? <Loader2 size={14} className="animate-spin" /> : <List size={14} />} Key Points
-                    </button>
-                  </div>
-
-                  {chapterResult && (
-                    <div className="space-y-4 animate-fade-in-up">
-                      <div className="bg-parchment p-5 rounded-sm border border-coffee-cream/20 relative">
-                        <button onClick={() => { setChapterResult(''); setActiveAction(null); setNoteTitle(''); }} className="absolute top-2 right-2 text-coffee-cream/50 hover:text-maple-rust transition-colors"><X size={16} /></button>
-                        <p className="font-body text-sm text-library-ink whitespace-pre-wrap leading-relaxed pr-6">{chapterResult}</p>
-                      </div>
-                      <div>
-                        <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-1">Note Title (optional)</label>
-                        <input type="text" value={noteTitle} onChange={(e) => setNoteTitle(e.target.value)} placeholder="e.g., Chapter 1 Summary..." className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm" />
-                      </div>
-                      <div className="flex justify-end">
-                        <button onClick={handleSaveNote} disabled={justSaved} className={`flex items-center gap-2 px-5 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider transition-all duration-300 ${justSaved ? 'bg-porch-sage text-page-cream cursor-default' : 'bg-maple-rust text-page-cream hover:bg-yale-blue'}`}>
-                          {justSaved ? <><CheckCircle size={14} /> Saved!</> : <><Save size={14} /> Save to Notes</>}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* ✅ AI Q&A Chat — correctement placé APRÈS l'AI Assistant */}
-                <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <MessageCircle size={18} className="text-maple-rust" />
-                    <h3 className="font-display text-lg text-yale-blue">Ask Questions About This Chapter</h3>
-                  </div>
-
-                  <div className="bg-page-cream/50 rounded-sm border border-coffee-cream/20 h-64 overflow-y-auto p-4 space-y-3">
-                    {chatMessages.length === 0 ? (
-                      <p className="text-center text-coffee-cream italic text-sm py-8">Ask me anything about this chapter's content!</p>
-                    ) : (
-                      chatMessages.map((msg, idx) => (
-                        <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[85%] p-3 rounded-sm text-sm leading-relaxed ${
-                            msg.role === 'user' 
-                              ? 'bg-yale-blue text-page-cream rounded-br-none' 
-                              : 'bg-parchment border border-coffee-cream/20 text-library-ink rounded-bl-none'
-                          }`}>
-                            {msg.content}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                    {isAsking && (
-                      <div className="flex justify-start">
-                        <div className="bg-parchment border border-coffee-cream/20 p-3 rounded-sm rounded-bl-none flex items-center gap-2">
-                          <Loader2 size={14} className="animate-spin text-coffee-cream" />
-                          <span className="text-sm text-coffee-cream italic">Thinking...</span>
-                        </div>
-                      </div>
-                    )}
-                    <div ref={chatEndRef} />
-                  </div>
-
-                  <form onSubmit={handleAskQuestion} className="flex gap-2">
-                    <input
-                      type="text"
-                      value={questionInput}
-                      onChange={(e) => setQuestionInput(e.target.value)}
-                      placeholder="e.g., What is the main cause of...?"
-                      disabled={isAsking}
-                      className="flex-1 p-3 bg-page-cream border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm disabled:opacity-50"
-                    />
-                    <button
-                      type="submit"
-                      disabled={isAsking || !questionInput.trim()}
-                      className="bg-maple-rust text-page-cream px-4 py-3 rounded-sm hover:bg-yale-blue transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Send size={18} />
-                    </button>
-                  </form>
-                </div>
-
-                {/* ✅ Saved Notes — avec la correction <div> au lieu de <button> */}
-                {savedNotes.length > 0 && (
-                  <div ref={notesSectionRef} className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
-                    <h4 className="font-display text-lg text-yale-blue flex items-center gap-2">
-                      <FileText size={18} />
-                      Notes for "{selectedChapter.title}"
-                    </h4>
-                    
-                    <div className="space-y-3">
-                      {savedNotes.map((note, idx) => (
-                        <div key={note.id} className="bg-page-cream border border-coffee-cream/20 rounded-sm overflow-hidden">
-                          {/* ✅ CORRECTION : <div> au lieu de <button> pour éviter le bouton imbriqué */}
-                          <div
-                            onClick={() => setExpandedNote(expandedNote === note.id ? null : note.id)}
-                            className="w-full flex items-center justify-between p-3 hover:bg-coffee-cream/10 transition-colors text-left cursor-pointer"
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpandedNote(expandedNote === note.id ? null : note.id); }}
-                          >
-                            <div className="flex-1">
-                              <span className="font-body text-sm font-medium text-library-ink">
-                                {note.title || `Note ${idx + 1}`}
-                              </span>
-                              <span className="font-label text-xs text-coffee-cream ml-2">
-                                • {new Date(note.created_at).toLocaleDateString()}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={(e) => { e.stopPropagation(); deleteNote(note.id); }}
-                                className="text-coffee-cream/40 hover:text-maple-rust transition-colors"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                              <ChevronDown 
-                                size={16} 
-                                className={`text-coffee-cream transition-transform ${expandedNote === note.id ? 'rotate-180' : ''}`}
-                              />
-                            </div>
-                          </div>
-
-                          {expandedNote === note.id && (
-                            <div className="p-4 border-t border-coffee-cream/20 space-y-4 animate-fade-in-up">
-                              {note.ai_summary && (
-                                <div>
-                                  <h5 className="font-label text-xs uppercase tracking-wider text-coffee-cream mb-2 flex items-center gap-1">
-                                    <FileText size={12} /> Summary
-                                  </h5>
-                                  <p className="font-body text-sm text-library-ink leading-relaxed whitespace-pre-wrap">
-                                    {note.ai_summary}
-                                  </p>
-                                </div>
-                              )}
-                              
-                              {note.ai_explanation && (
-                                <div>
-                                  <h5 className="font-label text-xs uppercase tracking-wider text-coffee-cream mb-2 flex items-center gap-1">
-                                    <Lightbulb size={12} /> Simple Explanation
-                                  </h5>
-                                  <p className="font-body text-sm text-library-ink leading-relaxed whitespace-pre-wrap">
-                                    {note.ai_explanation}
-                                  </p>
-                                </div>
-                              )}
-                              
-                              {note.ai_key_points && note.ai_key_points.length > 0 && (
-                                <div>
-                                  <h5 className="font-label text-xs uppercase tracking-wider text-coffee-cream mb-2 flex items-center gap-1">
-                                    <List size={12} /> Key Points
-                                  </h5>
-                                  <ul className="space-y-2">
-                                    {note.ai_key_points.map((point, pIdx) => (
-                                      <li key={pIdx} className="font-body text-sm text-library-ink flex items-start gap-2">
-                                        <span className="text-maple-rust mt-1.5">•</span>
-                                        {point}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="text-center text-coffee-cream italic py-20 bg-parchment/50 rounded-sm border border-coffee-cream/20">
-                <BookOpen size={48} className="mx-auto mb-4 opacity-30" />
-                <p>Select a chapter to view content and use AI tools</p>
-              </div>
-            )}
+          {/* Right column placeholder since detail view is now in ChapterDetail.jsx */}
+          <div className="lg:col-span-2">
+            <div className="text-center text-coffee-cream italic py-20 bg-parchment/50 rounded-sm border border-coffee-cream/20 h-full flex flex-col items-center justify-center">
+              <BookOpen size={48} className="mx-auto mb-4 opacity-30" />
+              <p>Select a chapter to open it in the detailed view.</p>
+            </div>
           </div>
         </div>
       </div>
