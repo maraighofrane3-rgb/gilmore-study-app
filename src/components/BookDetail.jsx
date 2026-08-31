@@ -16,12 +16,17 @@ export default function BookDetail({ book, onBack }) {
   const [currentBook, setCurrentBook] = useState(book);
   const fileInputRef = useRef(null);
 
-  // 🤖 The Librarian (now lives inside the book)
+  // 🤖 The Librarian states
   const [inputText, setInputText] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [activeAction, setActiveAction] = useState(null);
   const [result, setResult] = useState('');
   const [justSaved, setJustSaved] = useState(false);
+
+  // 📖 Reading Progress states
+  const [progressPage, setProgressPage] = useState('');
+  const [totalInput, setTotalInput] = useState('');
+  const [savingProgress, setSavingProgress] = useState(false);
 
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
@@ -58,7 +63,6 @@ export default function BookDetail({ book, onBack }) {
     setUploadingPDF(true);
     try {
       const extractedText = await extractTextFromPDF(file);
-
       const fileExt = file.name.split('.').pop();
       const fileName = `${user.id}/books/${Date.now()}.${fileExt}`;
 
@@ -89,7 +93,46 @@ export default function BookDetail({ book, onBack }) {
     e.target.value = '';
   };
 
-  // 🤖 Analyze — uses the pasted excerpt, or the uploaded PDF text automatically
+  // 📖 Save reading progress to database
+  const updateProgress = async (page, total) => {
+    const totalPages = total !== undefined && total !== ''
+      ? (parseInt(total, 10) || null)
+      : (currentBook.total_pages || null);
+
+    let currentPage = Math.max(0, parseInt(page, 10) || 0);
+    if (totalPages && currentPage > totalPages) currentPage = totalPages;
+
+    const updates = { current_page: currentPage };
+    if (totalPages) updates.total_pages = totalPages;
+    if (totalPages && currentPage >= totalPages) updates.status = 'read';
+
+    setSavingProgress(true);
+    const { error } = await supabase.from('books').update(updates).eq('id', currentBook.id);
+    setSavingProgress(false);
+
+    if (error) {
+      showNotification('Failed to update progress.', 'error');
+      return;
+    }
+    setCurrentBook({ ...currentBook, ...updates });
+    setProgressPage('');
+    showNotification(updates.status === 'read' ? 'Book completed! 🎉' : 'Progress saved!');
+  };
+
+  const markFinished = async () => {
+    const updates = { status: 'read' };
+    if (currentBook.total_pages) updates.current_page = currentBook.total_pages;
+
+    setSavingProgress(true);
+    const { error } = await supabase.from('books').update(updates).eq('id', currentBook.id);
+    setSavingProgress(false);
+
+    if (error) return showNotification('Failed to update.', 'error');
+    setCurrentBook({ ...currentBook, ...updates });
+    showNotification('Book completed! 🎉');
+  };
+
+  // 🤖 Analyze excerpt or full PDF text
   const handleAnalyze = async (action) => {
     const sourceText = inputText.trim() || (currentBook.ai_text_content || '');
     if (!sourceText) {
@@ -122,7 +165,7 @@ export default function BookDetail({ book, onBack }) {
     setAnalyzing(false);
   };
 
-  // 💾 Save the AI result as a note for THIS book
+  // 💾 Save AI result as note
   const handleSaveNote = async () => {
     if (!result || !activeAction) return;
 
@@ -218,7 +261,87 @@ export default function BookDetail({ book, onBack }) {
         </button>
       </div>
 
-      {/* 🤖 The Librarian — AI assistant for THIS book */}
+      {/* 📖 Reading Progress Tracker */}
+      <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="font-display text-lg text-yale-blue flex items-center gap-2">
+            <BookOpen size={18} className="text-maple-rust" /> Reading Progress
+          </h3>
+          {currentBook.total_pages > 0 && (
+            <span className="font-body text-sm text-coffee-cream italic">
+              {currentBook.current_page || 0} / {currentBook.total_pages} pages
+            </span>
+          )}
+        </div>
+
+        {currentBook.total_pages > 0 && (
+          <div className="flex items-center gap-4">
+            <div className="flex-1 h-2 bg-page-cream rounded-full overflow-hidden">
+              <div
+                className="h-full bg-maple-rust transition-all duration-500"
+                style={{
+                  width: `${Math.min(100, Math.round(((currentBook.current_page || 0) / currentBook.total_pages) * 100))}%`
+                }}
+              />
+            </div>
+            <span className="font-display text-2xl text-maple-rust">
+              {Math.min(100, Math.round(((currentBook.current_page || 0) / currentBook.total_pages) * 100))}%
+            </span>
+          </div>
+        )}
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            updateProgress(
+              progressPage !== '' ? progressPage : currentBook.current_page,
+              totalInput
+            );
+          }}
+          className="flex flex-wrap items-center gap-2"
+        >
+          <input
+            type="number"
+            min="0"
+            max={currentBook.total_pages || undefined}
+            value={progressPage}
+            onChange={(e) => setProgressPage(e.target.value)}
+            placeholder={`Pages read (I'm on page ${currentBook.current_page || 0})...`}
+            className="flex-1 min-w-[160px] p-2.5 bg-page-cream border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+          />
+          <input
+            type="number"
+            min="1"
+            value={totalInput}
+            onChange={(e) => setTotalInput(e.target.value)}
+            placeholder={currentBook.total_pages ? `Total: ${currentBook.total_pages}` : 'Total pages...'}
+            className="w-36 p-2.5 bg-page-cream border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+          />
+          <button
+            type="submit"
+            disabled={savingProgress}
+            className="bg-yale-blue text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => updateProgress((currentBook.current_page || 0) + 10)}
+            className="px-3 py-2.5 border border-coffee-cream/30 rounded-sm font-label text-xs uppercase tracking-wider text-coffee-cream hover:bg-coffee-cream/10 transition-colors"
+          >
+            +10
+          </button>
+          <button
+            type="button"
+            onClick={markFinished}
+            className="px-3 py-2.5 bg-porch-sage text-page-cream rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-colors"
+          >
+            Finished 🎉
+          </button>
+        </form>
+      </div>
+
+      {/* 🤖 The Librarian */}
       <div className="bg-page-cream p-6 rounded-sm border-l-4 border-gilmore-gold shadow-cozy space-y-4">
         <div className="flex items-center gap-2">
           <Sparkles size={18} className="text-gilmore-gold" />

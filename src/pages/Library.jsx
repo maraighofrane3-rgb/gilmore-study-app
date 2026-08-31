@@ -178,10 +178,11 @@ export default function Library() {
       .select()
       .single();
 
-    if (error) {
-      setError('Could not add this book. Please try again.');
+      if (error) {
+      console.error('Add book error:', error);
+      setError(`Could not add this book: ${error.message}`);
       showNotification('Failed to add book.', 'error');
-    } else {
+    }  else {
       setBooks(prev => [data, ...prev]);
       setIsAdding(false);
       setNewBook(EMPTY_NEW_BOOK);
