@@ -5,8 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import { useFocusTimer } from '../context/FocusTimerContext';
 import DailyCoach from '../components/DailyCoach';
 import {
-  Play, Plus, PenLine, Upload, ArrowRight, CheckCircle, Circle,
-  BookOpen, CalendarDays, ChevronRight,
+  Play, Plus, PenLine, Upload, CheckCircle, Circle,
+  CalendarDays, ChevronRight,
 } from 'lucide-react';
 
 function getGreeting() {
@@ -19,8 +19,6 @@ function getGreeting() {
 const keyOf = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-// Real elapsed time, live — e.g. "0:45:12". Storage may hold fractional
-// minutes (see FocusTimerContext.done()); this formats seconds exactly.
 function formatHMS(totalSeconds) {
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
@@ -36,18 +34,9 @@ export default function Dashboard() {
   const [goalHours, setGoalHours] = useState(6);
   const [loading, setLoading] = useState(true);
   const [greeting] = useState(getGreeting);
-  const [lastChapter, setLastChapter] = useState(null);
 
   const today = new Date();
   const todayKey = keyOf(today);
-
-  // 📖 "Continue studying" memory
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('rgw-last-chapter');
-      if (raw) setLastChapter(JSON.parse(raw));
-    } catch { /* ignore */ }
-  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -66,8 +55,6 @@ export default function Dashboard() {
     };
     loadData();
     return () => { mounted = false; };
-    // re-fetch whenever a focus session gets banked (Done/natural completion),
-    // even if we never left the Dashboard.
   }, [user, todayKey, completedAt]);
 
   const toggleTask = async (task) => {
@@ -85,9 +72,6 @@ export default function Dashboard() {
     .sort((a, b) => a.due_date.localeCompare(b.due_date))
     .slice(0, 5);
 
-  // Live progress: banked minutes (from Supabase) + whatever's elapsed in
-  // the CURRENT running/paused session (from FocusTimerContext), so the
-  // ring and the time both move in real time — not just after "Done".
   const goalMinutes = goalHours * 60;
   const liveSeconds = timeLeft < durationMin * 60 ? durationMin * 60 - timeLeft : 0;
   const totalSeconds = todayMinutes * 60 + liveSeconds;
@@ -190,25 +174,6 @@ export default function Dashboard() {
 
         {/* ── Right: now & next ── */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Continue studying */}
-          {lastChapter && (
-            <div className="cozy-card p-6 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <BookOpen size={20} className="text-maple-rust shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream">Continue studying</p>
-                  <p className="font-display text-lg text-yale-blue truncate">{lastChapter.title}</p>
-                </div>
-              </div>
-              <Link
-                to={`/study-materials/${lastChapter.materialId}/chapters/${lastChapter.chapterId}`}
-                className="flex items-center gap-2 shrink-0 text-maple-rust font-label text-xs uppercase tracking-wider hover:gap-3 transition-all"
-              >
-                Resume <ArrowRight size={14} />
-              </Link>
-            </div>
-          )}
-
           {/* Today's plan */}
           <div className="cozy-card p-6 space-y-3">
             <div className="flex items-center justify-between">
