@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useParams, Link } from 'react-router-dom';
@@ -26,7 +26,7 @@ export default function ChapterDetail() {
   const [savingEdit, setSavingEdit] = useState(false);
 
   const [analyzing, setAnalyzing] = useState(false);
-    const [fromPage, setFromPage] = useState('');
+  const [fromPage, setFromPage] = useState('');
   const [toPage, setToPage] = useState('');
   const [activeAction, setActiveAction] = useState(null);
   const [chapterResult, setChapterResult] = useState('');
@@ -44,10 +44,95 @@ export default function ChapterDetail() {
 
   const [chatMessages, setChatMessages] = useState([]);
   const [questionInput, setQuestionInput] = useState('');
+  const [chatFromPage, setChatFromPage] = useState('');
+  const [chatToPage, setChatToPage] = useState('');
   const [isAsking, setIsAsking] = useState(false);
   const chatEndRef = useRef(null);
 
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
+
+  // ============================================
+  // 🛠️ HELPER FUNCTIONS
+  // ============================================
+
+  const getReadableText = () => {
+    if (!chapter) return '';
+    if (chapter.ai_text_content && chapter.ai_text_content.trim()) return chapter.ai_text_content;
+    const c = chapter.content || '';
+    if (c.includes('<img') || c.includes('pdf-pages') || c.includes('pdf-divider')) return '';
+    return c.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  };
+
+  // Try several marker formats, return the first split that works (or null)
+  const splitByPages = (content) => {
+    const patterns = [
+      /[-_=*•–—]{2,}\s*page\s+(\d+)\s*[-_=*•–—]{2,}/i,
+      /[-_=*•–—]\s*page\s+(\d+)\s*[-_=*•–—]/i,
+      /\*\*\s*page\s+(\d+)\s*\*\*/i,
+      /(?:^|\n)\s*page\s+(\d+)\s*(?=\n)/i,
+    ];
+    for (const pattern of patterns) {
+      const parts = content.split(pattern);
+      if (parts.length >= 3) return parts;
+    }
+    return null;
+  };
+
+  // Returns: text of the range | '' (range empty) | null (no markers)
+  const getPageRangeText = (from, to) => {
+    const content = getReadableText();
+    if (!content) return '';
+
+    const parts = splitByPages(content);
+    if (!parts) return null;
+
+    const pages = {};
+    for (let i = 1; i < parts.length; i += 2) {
+      pages[parseInt(parts[i], 10)] = (parts[i + 1] || '').trim();
+    }
+
+    let result = '';
+    for (let p = from; p <= to; p++) {
+      if (pages[p]) result += pages[p] + '\n\n';
+    }
+    return result.trim();
+  };
+
+  // ============================================
+  // 📐 COMPUTED CONSTANTS
+  // ============================================
+
+  const rangeFrom = Math.max(1, parseInt(fromPage, 10) || 1);
+  const rangeTo = Math.max(rangeFrom, parseInt(toPage, 10) || rangeFrom);
+  const hasRange = fromPage !== '' || toPage !== '';
+
+  const chatRangeFrom = Math.max(1, parseInt(chatFromPage, 10) || 1);
+  const chatRangeTo = Math.max(chatRangeFrom, parseInt(chatToPage, 10) || chatRangeFrom);
+  const chatHasRange = chatFromPage !== '' || chatToPage !== '';
+
+  // ============================================
+  // 📖 MEMOIZED: text bounds
+  // ============================================
+
+  const textBounds = useMemo(() => {
+    const content = chapter?.ai_text_content || '';
+    if (!content) return null;
+    const parts = splitByPages(content);
+    if (!parts) return null;
+    let first = null, last = null;
+    for (let i = 1; i < parts.length; i += 2) {
+      const num = parseInt(parts[i], 10);
+      if ((parts[i + 1] || '').trim()) {
+        if (first === null) first = num;
+        last = num;
+      }
+    }
+    return first ? { first, last } : null;
+  }, [chapter]);
+
+  // ============================================
+  // 🔄 EFFECTS
+  // ============================================
 
   useEffect(() => {
     if (materialId && chapterId) {
@@ -77,6 +162,10 @@ export default function ChapterDetail() {
     }
   }, [chapter, materialId, chapterId]);
 
+  // ============================================
+  // 🔧 HANDLERS
+  // ============================================
+
   const showNotification = (message, type = 'success') => setNotification({ show: true, message, type });
 
   const fetchAll = async () => {
@@ -92,19 +181,16 @@ export default function ChapterDetail() {
     setLoading(false);
   };
 
-      const handlePDFUpload = async (e) => {
+  const handlePDFUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || file.type !== 'application/pdf') return;
 
     setUploadingPDF(true);
     try {
-      // 1. ✅ Extract text WITH page markers (for the AI + page ranges)
       const extractedText = await extractTextFromPDF(file);
-
-      // 2. Render images (for display)
       const htmlContent = await renderPDFAsImages(file);
 
-      const divider = `\n\n<div class="pdf-divider" style="text-align: center; margin: 2rem 0; color: #8b5e3c; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; border-top: 1px solid #d4c5b5; border-bottom: 1px solid #d4c5b5; padding: 1rem 0;">📄 ${file.name} · ajouté le ${new Date().toLocaleDateString()}</div>\n\n`;
+      const divider = `\n\n<div class="pdf-divider" style="text-align: center; margin: 2rem 0; color: #8b5e3c; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; border-top: 1px solid #d4c5b5; border-bottom: 1px solid #d4c5b5; padding: 1rem 0;">📄 ${file.name} · added on ${new Date().toLocaleDateString()}</div>\n\n`;
 
       const isExistingHtml = chapter.content && (chapter.content.includes('<img') || chapter.content.includes('<div class="pdf-pages"'));
 
@@ -116,7 +202,6 @@ export default function ChapterDetail() {
         .from('chapters')
         .update({
           content: newContent,
-          // ✅ Append the extracted text so the AI can read it
           ai_text_content: (chapter.ai_text_content ? chapter.ai_text_content + '\n\n' : '') + extractedText,
           is_from_pdf: true
         })
@@ -129,10 +214,10 @@ export default function ChapterDetail() {
         ai_text_content: (chapter.ai_text_content ? chapter.ai_text_content + '\n\n' : '') + extractedText,
         is_from_pdf: true
       });
-      showNotification(`PDF ajouté ! Texte extrait pour l'IA.`);
+      showNotification(`PDF added! Text extracted for AI.`);
     } catch (err) {
-      console.error('Erreur upload PDF:', err);
-      showNotification(`Échec du traitement du PDF: ${err.message}`, 'error');
+      console.error('PDF upload error:', err);
+      showNotification(`Failed to process PDF: ${err.message}`, 'error');
     }
     setUploadingPDF(false);
     e.target.value = '';
@@ -165,58 +250,43 @@ export default function ChapterDetail() {
     showNotification('Chapter updated!');
   };
 
+  const handleAnalyze = async (action) => {
+    const rawText = getReadableText();
 
-    // 📄 Extract only the text between page X and page Y (uses the "--- Page N ---" markers)
-  const getPageRangeText = (from, to) => {
-    const content = chapter.ai_text_content || chapter.content || '';
-    if (!content) return '';
-
-    const parts = content.split(/---\s*Page\s+(\d+)\s*---/);
-    // No markers found (manual chapter) → fallback to the whole text
-    if (parts.length < 3) return content;
-
-    const pages = {};
-    for (let i = 1; i < parts.length; i += 2) {
-      pages[parseInt(parts[i], 10)] = (parts[i + 1] || '').trim();
-    }
-
-    let result = '';
-    for (let p = from; p <= to; p++) {
-      if (pages[p]) result += pages[p] + '\n\n';
-    }
-    return result.trim();
-  };
-
-        const handleAnalyze = async (action) => {
-    // Get the best available text source
-    let rawText = chapter.ai_text_content || '';
-    
-    // Fallback to content if ai_text_content doesn't exist
-    if (!rawText && chapter.content) {
-      // Clean HTML tags from content if it contains HTML
-      rawText = chapter.content.includes('<img') || chapter.content.includes('<div')
-        ? chapter.content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ')
-        : chapter.content;
-    }
-    
-    if (!rawText || !rawText.trim()) {
-      showNotification('No text available to analyze. Upload a PDF or add content first.', 'error');
+    if (!rawText) {
+      showNotification('This chapter has no readable text yet. Click "Add PDF" to extract it.', 'error');
       return;
     }
 
     const f = Math.max(1, parseInt(fromPage, 10) || 1);
     const t = Math.max(f, parseInt(toPage, 10) || f);
-    const hasRange = fromPage !== '' || toPage !== '';
-    const scope = hasRange ? `pages ${f} to ${t}` : 'this chapter';
+    const hasRangeLocal = fromPage !== '' || toPage !== '';
 
-    // Extract page range if specified
-    let sourceText = hasRange ? getPageRangeText(f, t) : rawText;
-    
-    // Clean any remaining HTML or extra whitespace
-    sourceText = sourceText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-    
+    let sourceText = rawText;
+    let scope = 'this chapter';
+
+    if (hasRangeLocal) {
+      const ranged = getPageRangeText(f, t);
+      if (ranged === null) {
+        sourceText = rawText;
+        scope = 'this chapter';
+      } else if (ranged === '') {
+        showNotification(
+          textBounds
+            ? `Pages ${f}–${t} have no readable text (cover/contents). Readable pages: ${textBounds.first}–${textBounds.last}.`
+            : 'No text found in that page range. Check the page numbers.',
+          'error'
+        );
+        return;
+      } else {
+        sourceText = ranged;
+        scope = `pages ${f} to ${t}`;
+      }
+    }
+
+    sourceText = sourceText.replace(/\s+/g, ' ').trim();
     if (!sourceText) {
-      showNotification('No text found in that page range. Check the page numbers.', 'error');
+      showNotification('This chapter has no readable text yet. Click "Add PDF" to extract it.', 'error');
       return;
     }
 
@@ -228,18 +298,18 @@ export default function ChapterDetail() {
 
     try {
       let systemPrompt = '';
-      let charLimit = 12000;
-      
+      let charLimit = 5000;
+
       if (action === 'summarize') {
         systemPrompt = `Provide a concise, clear summary of ${scope} from "${chapter.title}". Focus on the main ideas and key takeaways in 2-3 paragraphs.`;
-        charLimit = 12000;
+        charLimit = 5000;
       } else if (action === 'explain') {
         systemPrompt = `Explain ${scope} from "${chapter.title}" in simple, clear terms. Break down any complex concepts or jargon.`;
-        charLimit = 12000;
+        charLimit = 5000;
       } else if (action === 'keypoints') {
         systemPrompt = `Extract the 5-7 most important key points from ${scope} of "${chapter.title}". Present them as a bulleted list.`;
-        charLimit = 8000;
-      }       else if (action === 'quiz') {
+        charLimit = 4000;
+      } else if (action === 'quiz') {
         systemPrompt = `Create a multiple-choice quiz (QCM) of 5 questions about ${scope} of "${chapter.title}". Format it EXACTLY like this:
 
 1. Question text
@@ -249,18 +319,34 @@ C) option
 D) option
 
 (after the 5 questions, add a line "Answers:" then list the correct letters, e.g. 1-B, 2-A, 3-C, 4-D, 5-A). Keep questions clear and focused on the key ideas.`;
-        charLimit = 8000;
+        charLimit = 4000;
       }
 
       const { data, error } = await supabase.functions.invoke('summarize-text', {
-        body: { 
-          text: sourceText.substring(0, charLimit), 
-          action, 
-          custom_prompt: systemPrompt 
+        body: {
+          text: sourceText.substring(0, charLimit),
+          action,
+          custom_prompt: systemPrompt
         },
       });
 
-      if (error) throw new Error(error.message || 'Failed to analyze');
+      if (error) {
+        let details = error.message || 'Failed to analyze';
+        try {
+          if (error.context) {
+            const errorBody = await error.context.json();
+            details = errorBody.error || errorBody.message || JSON.stringify(errorBody);
+          }
+        } catch {
+          // Keep default error message
+        }
+        throw new Error(details);
+      }
+
+      if (!data?.result) {
+        throw new Error('The AI returned an empty response.');
+      }
+
       setChapterResult(data.result);
       showNotification(`Analysis of ${scope} complete!`);
     } catch (err) {
@@ -280,18 +366,75 @@ D) option
     setIsAsking(true);
 
     try {
-      // Same clean logic for the Q&A chat
-      const rawText = chapter.ai_text_content || chapter.content;
-      const context = rawText.substring(0, 6000); // 6000 chars is plenty for question context
+      const baseText = getReadableText();
+      if (!baseText) {
+        setChatMessages(prev => [...prev, {
+          role: 'assistant',
+          content: "This chapter only contains scanned page images — there's no readable text yet. Click 'Add PDF' and select the PDF again to extract its text, then ask me anything!"
+        }]);
+        setIsAsking(false);
+        return;
+      }
+
+      let context = baseText;
+      let scopeNote = '';
+
+      if (chatHasRange) {
+        const ranged = getPageRangeText(chatRangeFrom, chatRangeTo);
+
+        if (ranged === null) {
+          context = baseText;
+          scopeNote = '';
+        } else if (ranged === '') {
+          setChatMessages(prev => [...prev, {
+            role: 'assistant',
+            content: textBounds
+              ? `Pages ${chatRangeFrom}–${chatRangeTo} contain no readable text (usually the cover & contents). The readable text runs from page ${textBounds.first} to ${textBounds.last} — try a range inside that!`
+              : "I can't find readable text for that page range. Try different page numbers."
+          }]);
+          setIsAsking(false);
+          return;
+        } else {
+          context = ranged;
+          scopeNote = ` (Answer using ONLY pages ${chatRangeFrom} to ${chatRangeTo} of the chapter.)`;
+        }
+      }
+
+      context = context.replace(/\s+/g, ' ').trim();
+
+      if (!context) {
+        setChatMessages(prev => [...prev, {
+          role: 'assistant',
+          content: "This chapter has no readable text yet. Click 'Add PDF' and select the PDF again to extract its text, then ask me anything!"
+        }]);
+        setIsAsking(false);
+        return;
+      }
 
       const { data, error } = await supabase.functions.invoke('ask-chapter', {
-        body: { question: userQuestion, context },
+        body: {
+          question: userQuestion + scopeNote,
+          context: context.substring(0, 8000),
+        },
       });
-      if (error) throw error;
+
+      if (error) {
+        let details = error.message || "Sorry, I couldn't process that question.";
+        try {
+          if (error.context) {
+            const errorBody = await error.context.json();
+            details = errorBody.error || errorBody.message || details;
+          }
+        } catch {
+          // Keep default
+        }
+        throw new Error(details);
+      }
+
       setChatMessages(prev => [...prev, { role: 'assistant', content: data.answer }]);
     } catch (err) {
       console.error('Q&A error:', err);
-      setChatMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I couldn't process that question." }]);
+      setChatMessages(prev => [...prev, { role: 'assistant', content: `Sorry: ${err.message}` }]);
     }
     setIsAsking(false);
   };
@@ -511,16 +654,14 @@ D) option
           <h3 className="font-display text-lg text-yale-blue">AI Study Assistant</h3>
         </div>
 
-        
-        {/* 👇👇👇 PAGE INPUTS — PASTED HERE, BETWEEN TITLE AND BUTTONS 👇👇👇 */}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-label text-xs uppercase tracking-wider text-coffee-cream">Analyser les pages :</span>
+          <span className="font-label text-xs uppercase tracking-wider text-coffee-cream">Analyze pages:</span>
           <input
             type="number"
             min="1"
             value={fromPage}
             onChange={(e) => setFromPage(e.target.value)}
-            placeholder="De (1)"
+            placeholder="From (1)"
             className="w-24 p-2.5 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
           />
           <span className="text-coffee-cream font-body">→</span>
@@ -529,23 +670,28 @@ D) option
             min="1"
             value={toPage}
             onChange={(e) => setToPage(e.target.value)}
-            placeholder="À (10)"
+            placeholder="To (10)"
             className="w-24 p-2.5 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
           />
-          <span className="font-body text-xs text-coffee-cream italic">Laissez vide pour analyser tout le chapitre.</span>
+          <span className="font-body text-xs text-coffee-cream italic">Leave empty to analyze the whole chapter.</span>
+          {textBounds && (
+            <span className="font-body text-xs text-porch-sage italic">
+              Readable text: pages {textBounds.first}–{textBounds.last}.
+            </span>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => handleAnalyze('summarize')} disabled={analyzing || !chapter.content} className="flex items-center gap-2 bg-yale-blue text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
+          <button onClick={() => handleAnalyze('summarize')} disabled={analyzing || !getReadableText()} className="flex items-center gap-2 bg-yale-blue text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
             {analyzing && activeAction === 'summarize' ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />} Summarize
           </button>
-          <button onClick={() => handleAnalyze('explain')} disabled={analyzing || !chapter.content} className="flex items-center gap-2 bg-porch-sage text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
+          <button onClick={() => handleAnalyze('explain')} disabled={analyzing || !getReadableText()} className="flex items-center gap-2 bg-porch-sage text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
             {analyzing && activeAction === 'explain' ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />} Explain Simply
           </button>
-          <button onClick={() => handleAnalyze('keypoints')} disabled={analyzing || !chapter.content} className="flex items-center gap-2 bg-gilmore-gold text-yale-blue px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust hover:text-page-cream transition-all disabled:opacity-50">
+          <button onClick={() => handleAnalyze('keypoints')} disabled={analyzing || !getReadableText()} className="flex items-center gap-2 bg-gilmore-gold text-yale-blue px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust hover:text-page-cream transition-all disabled:opacity-50">
             {analyzing && activeAction === 'keypoints' ? <Loader2 size={14} className="animate-spin" /> : <List size={14} />} Key Points
           </button>
-                    <button onClick={() => handleAnalyze('quiz')} disabled={analyzing || !chapter.content} className="flex items-center gap-2 bg-maple-rust text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50">
+          <button onClick={() => handleAnalyze('quiz')} disabled={analyzing || !getReadableText()} className="flex items-center gap-2 bg-maple-rust text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50">
             {analyzing && activeAction === 'quiz' ? <Loader2 size={14} className="animate-spin" /> : <HelpCircle size={14} />} Quiz (QCM)
           </button>
         </div>
@@ -571,9 +717,41 @@ D) option
 
       {/* Q&A Chat */}
       <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
-        <div className="flex items-center gap-2 mb-2">
-          <MessageCircle size={18} className="text-maple-rust" />
-          <h3 className="font-display text-lg text-yale-blue">Ask questions about this chapter</h3>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <MessageCircle size={18} className="text-maple-rust" />
+            <h3 className="font-display text-lg text-yale-blue">Ask questions about this chapter</h3>
+          </div>
+          <span className="font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream bg-page-cream border border-coffee-cream/20 px-2 py-1 rounded-sm">
+            {chatHasRange ? `📖 Pages ${chatRangeFrom}–${chatRangeTo}` : '📖 Whole chapter'}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-label text-xs uppercase tracking-wider text-coffee-cream">Answer from pages:</span>
+          <input
+            type="number"
+            min="1"
+            value={chatFromPage}
+            onChange={(e) => setChatFromPage(e.target.value)}
+            placeholder="From (1)"
+            className="w-24 p-2.5 bg-page-cream border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+          />
+          <span className="text-coffee-cream font-body">→</span>
+          <input
+            type="number"
+            min="1"
+            value={chatToPage}
+            onChange={(e) => setChatToPage(e.target.value)}
+            placeholder="To (10)"
+            className="w-24 p-2.5 bg-page-cream border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+          />
+          <span className="font-body text-xs text-coffee-cream italic">Leave empty to use the whole chapter.</span>
+          {textBounds && (
+            <span className="font-body text-xs text-porch-sage italic">
+              Readable text: pages {textBounds.first}–{textBounds.last}.
+            </span>
+          )}
         </div>
 
         <div className="bg-page-cream/50 rounded-sm border border-coffee-cream/20 h-64 overflow-y-auto p-4 space-y-3">
