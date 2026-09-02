@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useFocusTimer } from '../context/FocusTimerContext';
-import { Target, TrendingUp, BookOpen, ListChecks, Play, Pause, RotateCcw, CheckCircle  } from 'lucide-react';
+import { Target, TrendingUp, BookOpen, ListChecks, Play, Pause, RotateCcw, CheckCircle } from 'lucide-react';
 
 const DURATIONS = [
   { label: '25m', min: 25 },
@@ -18,10 +18,6 @@ function formatHMS(totalSeconds) {
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-// Display-only rounding — storage keeps the exact fractional minutes,
-// this just decides how to show them (seconds for tiny durations,
-// whole minutes/hours otherwise) instead of a raw decimal like
-// "0.2333333333333325m".
 function formatMinutes(totalMin) {
   const totalSeconds = Math.round(totalMin * 60);
   const h = Math.floor(totalSeconds / 3600);
@@ -33,25 +29,30 @@ function formatMinutes(totalMin) {
   return `${s}s`;
 }
 
-// (chart geometry removed — now a simple auto-scaled bar chart, see below)
-
 export default function Focus() {
   const { user } = useAuth();
   const {
-  timeLeft, isRunning, durationMin,
-  start, pause, reset, changeDuration,
-  selectedTaskId, setSelectedTaskId,
-  selectedGoalId, setSelectedGoalId,
-  completedAt, done,
-} = useFocusTimer();
+    timeLeft, isRunning, durationMin,
+    start, pause, reset, changeDuration,
+    selectedTaskId, setSelectedTaskId,
+    selectedGoalId, setSelectedGoalId,
+    completedAt, done,
+  } = useFocusTimer();
 
   const [tasks, setTasks] = useState([]);
   const [goals, setGoals] = useState([]);
-  const [focusMode, setFocusMode] = useState('task'); // 'task' | 'goal'
+  const [goalTasks, setGoalTasks] = useState([]); // ✅ NEW: tasks linked to goals
+  const [focusMode, setFocusMode] = useState('task');
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [weekMinutes, setWeekMinutes] = useState(0);
   const [weekDays, setWeekDays] = useState([]);
   const [dailyGoal, setDailyGoal] = useState(6);
+
+  // ✅ Tasks of the currently selected goal (pending only)
+  const tasksOfSelectedGoal = useMemo(
+    () => goalTasks.filter(t => t.goal_id === selectedGoalId && !t.completed),
+    [goalTasks, selectedGoalId]
+  );
 
   useEffect(() => {
     if (user) fetchStats();
@@ -63,9 +64,10 @@ export default function Focus() {
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
     const mondayISO = monday.toISOString().split('T')[0];
 
-    const [tasksRes, goalsRes, todayRes, weekRes, profileRes] = await Promise.all([
+    const [tasksRes, goalsRes, goalTasksRes, todayRes, weekRes, profileRes] = await Promise.all([
       supabase.from('tasks').select('id, title').eq('user_id', user.id).eq('status', 'todo'),
       supabase.from('goals').select('id, title').eq('user_id', user.id).eq('status', 'active'),
+      supabase.from('goal_tasks').select('id, title, goal_id, completed').eq('user_id', user.id).order('created_at', { ascending: true }),
       supabase.from('pomodoro_sessions').select('duration').eq('user_id', user.id).eq('completed', true).gte('created_at', `${today}T00:00:00`),
       supabase.from('pomodoro_sessions').select('duration, created_at').eq('user_id', user.id).eq('completed', true).gte('created_at', `${mondayISO}T00:00:00`),
       supabase.from('profiles').select('daily_goal_hours').eq('id', user.id).maybeSingle(),
@@ -73,11 +75,11 @@ export default function Focus() {
 
     setTasks(tasksRes.data || []);
     setGoals(goalsRes.data || []);
+    setGoalTasks(goalTasksRes.data || []);
     setTodayMinutes((todayRes.data || []).reduce((s, r) => s + (r.duration || 0), 0));
     setWeekMinutes((weekRes.data || []).reduce((s, r) => s + (r.duration || 0), 0));
     if (profileRes.data?.daily_goal_hours) setDailyGoal(profileRes.data.daily_goal_hours);
 
-    // Build the 7-day series (Mon → Sun)
     const days = [];
     for (let i = 0; i < 7; i++) {
       const d = new Date(monday);
@@ -102,8 +104,22 @@ export default function Focus() {
     await supabase.from('profiles').update({ daily_goal_hours: v }).eq('id', user.id);
   };
 
+  // ✅ When switching mode or changing goal, clear the task selection
+  const switchToTask = () => {
+    setFocusMode('task');
+    setSelectedGoalId(null);
+  };
+  const switchToGoal = () => {
+    setFocusMode('goal');
+    setSelectedTaskId(null);
+  };
+  const handleGoalSelect = (goalId) => {
+    setSelectedGoalId(goalId || null);
+    setSelectedTaskId(null); // reset task when goal changes
+  };
+
   const goalMinutes = dailyGoal * 60;
-   const liveSeconds = timeLeft < durationMin * 60 ? durationMin * 60 - timeLeft : 0;
+  const liveSeconds = timeLeft < durationMin * 60 ? durationMin * 60 - timeLeft : 0;
   const totalSeconds = todayMinutes * 60 + liveSeconds;
   const percent = Math.min(100, Math.round((totalSeconds / (goalMinutes * 60)) * 100));
   const todayStr = new Date().toISOString().split('T')[0];
@@ -121,7 +137,7 @@ export default function Focus() {
           </div>
         </div>
         <div className="flex-1 min-w-[200px]">
-                    <p className="font-body text-sm text-coffee-cream mb-2 tabular-nums">
+          <p className="font-body text-sm text-coffee-cream mb-2 tabular-nums">
             {formatHMS(totalSeconds)} completed
           </p>
           <div className="w-full bg-coffee-cream/20 rounded-full h-2">
@@ -139,10 +155,11 @@ export default function Focus() {
       </div>
 
       {/* Focus target: task or goal */}
-      <div className="max-w-xl mx-auto space-y-2">
+      <div className="max-w-xl mx-auto space-y-3">
+        {/* Mode switch */}
         <div className="flex gap-2">
           <button
-            onClick={() => setFocusMode('task')}
+            onClick={switchToTask}
             className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-sm font-label text-xs uppercase tracking-wider border transition-colors ${
               focusMode === 'task'
                 ? 'bg-yale-blue text-page-cream border-yale-blue'
@@ -152,7 +169,7 @@ export default function Focus() {
             <ListChecks size={14} /> Task
           </button>
           <button
-            onClick={() => setFocusMode('goal')}
+            onClick={switchToGoal}
             className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-sm font-label text-xs uppercase tracking-wider border transition-colors ${
               focusMode === 'goal'
                 ? 'bg-yale-blue text-page-cream border-yale-blue'
@@ -163,37 +180,90 @@ export default function Focus() {
           </button>
         </div>
 
-        <div className="flex items-center gap-2 bg-page-cream border border-coffee-cream/20 rounded-sm px-4 py-3">
-          {focusMode === 'task' ? (
-            <>
-              <BookOpen size={18} className="text-coffee-cream shrink-0" />
-              <select
-                value={selectedTaskId || ''}
-                onChange={(e) => setSelectedTaskId(e.target.value || null)}
-                className="flex-1 bg-transparent focus:outline-none font-body text-sm text-library-ink"
-              >
-                <option value="">Select a task (optional)...</option>
-                {tasks.map((t) => (
-                  <option key={t.id} value={t.id}>{t.title}</option>
-                ))}
-              </select>
-            </>
-          ) : (
-            <>
+        {/* TASK mode */}
+        {focusMode === 'task' && (
+          <div className="flex items-center gap-2 bg-page-cream border border-coffee-cream/20 rounded-sm px-4 py-3">
+            <BookOpen size={18} className="text-coffee-cream shrink-0" />
+            <select
+              value={selectedTaskId || ''}
+              onChange={(e) => setSelectedTaskId(e.target.value || null)}
+              className="flex-1 bg-transparent focus:outline-none font-body text-sm text-library-ink"
+            >
+              <option value="">Select a task (optional)...</option>
+              {tasks.map((t) => (
+                <option key={t.id} value={t.id}>{t.title}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* GOAL mode — goal select + task chips bar */}
+        {focusMode === 'goal' && (
+          <div className="space-y-3 animate-fade-in-up">
+            {/* Goal select */}
+            <div className="flex items-center gap-2 bg-page-cream border border-coffee-cream/20 rounded-sm px-4 py-3">
               <Target size={18} className="text-coffee-cream shrink-0" />
               <select
                 value={selectedGoalId || ''}
-                onChange={(e) => setSelectedGoalId(e.target.value || null)}
+                onChange={(e) => handleGoalSelect(e.target.value)}
                 className="flex-1 bg-transparent focus:outline-none font-body text-sm text-library-ink"
               >
-                <option value="">Select a goal (optional)...</option>
+                <option value="">Select a goal...</option>
                 {goals.map((g) => (
                   <option key={g.id} value={g.id}>{g.title}</option>
                 ))}
               </select>
-            </>
-          )}
-        </div>
+            </div>
+
+            {/* ✅ Task chips bar — appears right after a goal is selected */}
+            {selectedGoalId && (
+              <div className="space-y-2 animate-fade-in-up">
+                <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream flex items-center gap-1.5">
+                  <ListChecks size={12} className="text-maple-rust" />
+                  Pick a specific task (optional):
+                </p>
+
+                {tasksOfSelectedGoal.length === 0 ? (
+                  <p className="font-body text-xs text-coffee-cream/60 italic">
+                    No pending tasks for this goal — you'll focus on the goal itself.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {tasksOfSelectedGoal.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setSelectedTaskId(selectedTaskId === t.id ? null : t.id)}
+                        className={`px-3 py-2 rounded-sm font-body text-xs border transition-all ${
+                          selectedTaskId === t.id
+                            ? 'bg-maple-rust text-page-cream border-maple-rust shadow-sm'
+                            : 'bg-page-cream text-library-ink border-coffee-cream/30 hover:border-maple-rust/50 hover:text-maple-rust'
+                        }`}
+                      >
+                        {t.title}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Summary of what you're about to focus on */}
+                {selectedTaskId && (
+                  <div className="bg-page-cream/50 p-3 rounded-sm border-l-4 border-gilmore-gold">
+                    <p className="font-label text-[0.6rem] uppercase tracking-wider text-gilmore-gold mb-0.5">
+                      Focus on
+                    </p>
+                    <p className="font-display text-sm text-yale-blue">
+                      {tasksOfSelectedGoal.find(t => t.id === selectedTaskId)?.title}
+                    </p>
+                    <p className="font-body text-xs text-coffee-cream italic">
+                      from: {goals.find(g => g.id === selectedGoalId)?.title}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Timer */}
@@ -219,7 +289,7 @@ export default function Focus() {
         ))}
       </div>
 
-          {/* Controls */}
+      {/* Controls */}
       <div className="flex justify-center gap-3 flex-wrap">
         {isRunning ? (
           <button
@@ -237,7 +307,6 @@ export default function Focus() {
           </button>
         )}
 
-        {/* ✅ Done: banks elapsed time even mid-session */}
         <button
           onClick={done}
           disabled={timeLeft === durationMin * 60}
@@ -254,7 +323,7 @@ export default function Focus() {
         </button>
       </div>
 
-      {/* 📊 Weekly Progress — bar chart, auto-scaled to this week's actual values */}
+      {/* Weekly Progress */}
       <div className="cozy-card p-6 space-y-6">
         <div className="flex items-center gap-4">
           <TrendingUp size={22} className="text-porch-sage" />

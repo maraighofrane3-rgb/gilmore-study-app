@@ -120,3 +120,31 @@ export const renderPDFAsImages = async (file) => {
     throw error;
   }
 };
+// 📕 Render the FIRST page of a PDF as a JPEG cover image (returns a Blob)
+export async function extractCoverFromPDF(file, maxWidth = 600) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const page = await pdf.getPage(1);
+
+  // Scale so the cover is ~600px wide (good quality, small file)
+  const baseViewport = page.getViewport({ scale: 1 });
+  const scale = maxWidth / baseViewport.width;
+  const viewport = page.getViewport({ scale });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const ctx = canvas.getContext('2d');
+
+  await page.render({ canvasContext: ctx, viewport }).promise;
+
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('Could not create cover image'))),
+      'image/jpeg',
+      0.85
+    );
+  });
+
+  return blob;
+};

@@ -3,9 +3,9 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import {
   ArrowLeft, FileText, Lightbulb, Quote, BookOpen, Trash2, Upload, Loader2,
-  Sparkles, X, Save, CheckCircle
+  Sparkles, X, Save, CheckCircle, Image as ImageIcon
 } from 'lucide-react';
-import { extractTextFromPDF } from '../utils/pdfWorker';
+import { extractTextFromPDF, extractCoverFromPDF } from '../utils/pdfWorker';
 
 export default function BookDetail({ book, onBack }) {
   const { user } = useAuth();
@@ -36,6 +36,11 @@ export default function BookDetail({ book, onBack }) {
   const [personalReflection, setPersonalReflection] = useState(book.personal_reflection || '');
   const [editingReflection, setEditingReflection] = useState(false);
   const [savingReflection, setSavingReflection] = useState(false);
+
+    const [uploadingCover, setUploadingCover] = useState(false);
+  const coverInputRef = useRef(null);
+
+
   useEffect(() => {
     if (currentBook) fetchNotes();
   }, [currentBook]);
@@ -62,6 +67,7 @@ export default function BookDetail({ book, onBack }) {
   };
 
   // 📕 Upload the book's PDF (viewer + AI text)
+    // 📕 Upload the book's PDF (viewer + AI text + auto cover from page 1)
   const handleBookPDFUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || file.type !== 'application/pdf') return;
@@ -69,6 +75,7 @@ export default function BookDetail({ book, onBack }) {
     setUploadingPDF(true);
     try {
       const extractedText = await extractTextFromPDF(file);
+
       const fileExt = file.name.split('.').pop();
       const fileName = `${user.id}/books/${Date.now()}.${fileExt}`;
 
@@ -82,21 +89,79 @@ export default function BookDetail({ book, onBack }) {
         .from('pdf-documents')
         .getPublicUrl(fileName);
 
+      const updates = { pdf_url: publicUrl, file_path: fileName, ai_text_content: extractedText };
+
+      // 🖼️ AUTO-COVER: render page 1 as the cover (only if no cover exists yet)
+      if (!currentBook.cover_url) {
+        try {
+          const coverBlob = await extractCoverFromPDF(file);
+          const coverPath = `${user.id}/covers/${Date.now()}.jpg`;
+          const { error: coverErr } = await supabase.storage
+            .from('pdf-documents')
+            .upload(coverPath, coverBlob, { contentType: 'image/jpeg', cacheControl: '3600', upsert: false });
+
+          if (!coverErr) {
+            updates.cover_url = supabase.storage
+              .from('pdf-documents')
+              .getPublicUrl(coverPath).data.publicUrl;
+          }
+        } catch (coverErr) {
+          console.warn('Auto-cover failed (non-blocking):', coverErr);
+        }
+      }
+
       const { error } = await supabase
         .from('books')
-        .update({ pdf_url: publicUrl, file_path: fileName, ai_text_content: extractedText })
+        .update(updates)
         .eq('id', currentBook.id);
 
       if (error) throw error;
 
-      setCurrentBook({ ...currentBook, pdf_url: publicUrl, ai_text_content: extractedText });
-      setUsePdfText(true); // ✅ Active automatiquement le mode PDF après upload
-      showNotification('PDF attached! The Librarian can now read your book.');
+      setCurrentBook({ ...currentBook, ...updates });
+      setUsePdfText(true);
+      showNotification(
+        updates.cover_url
+          ? 'PDF attached! Cover generated from page 1. 📕'
+          : 'PDF attached! The Librarian can now read your book.'
+      );
     } catch (err) {
       console.error('Book PDF upload error:', err);
       showNotification(`Failed to upload PDF: ${err.message}`, 'error');
     }
     setUploadingPDF(false);
+    e.target.value = '';
+  };
+
+
+    // 🖼️ Upload / change the book cover
+  const handleCoverUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file || !file.type.startsWith('image/')) return;
+
+    setUploadingCover(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const path = `${user.id}/covers/${Date.now()}.${ext}`;
+
+      const { error: upErr } = await supabase.storage
+        .from('pdf-documents')
+        .upload(path, file, { cacheControl: '3600', upsert: false });
+      if (upErr) throw upErr;
+
+      const publicUrl = supabase.storage.from('pdf-documents').getPublicUrl(path).data.publicUrl;
+
+      const { error } = await supabase
+        .from('books')
+        .update({ cover_url: publicUrl })
+        .eq('id', currentBook.id);
+      if (error) throw error;
+
+      setCurrentBook({ ...currentBook, cover_url: publicUrl });
+      showNotification('Cover updated!');
+    } catch (err) {
+      showNotification(`Failed to upload cover: ${err.message}`, 'error');
+    }
+    setUploadingCover(false);
     e.target.value = '';
   };
 
@@ -308,27 +373,46 @@ export default function BookDetail({ book, onBack }) {
         </div>
       )}
 
-      {/* Header */}
+            {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <button onClick={onBack} className="p-2 rounded-sm hover:bg-coffee-cream/10 transition-colors">
             <ArrowLeft size={20} className="text-coffee-cream" />
           </button>
+          {currentBook.cover_url && (
+            <img
+              src={currentBook.cover_url}
+              alt={`${currentBook.title} cover`}
+              className="w-14 h-20 object-cover rounded-sm border border-coffee-cream/20 shadow-cozy"
+            />
+          )}
           <div>
             <h1 className="font-display text-3xl text-yale-blue">{currentBook.title}</h1>
             <p className="font-body text-sm text-coffee-cream italic">by {currentBook.author}</p>
           </div>
         </div>
 
-        <input type="file" accept=".pdf,application/pdf" ref={fileInputRef} className="hidden" onChange={handleBookPDFUpload} />
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploadingPDF}
-          className="flex items-center gap-2 bg-maple-rust text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50"
-        >
-          {uploadingPDF ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-          {uploadingPDF ? 'Uploading...' : 'Upload PDF'}
-        </button>
+        <div className="flex items-center gap-2">
+          <input type="file" accept="image/*" ref={coverInputRef} className="hidden" onChange={handleCoverUpload} />
+          <button
+            onClick={() => coverInputRef.current?.click()}
+            disabled={uploadingCover}
+            className="flex items-center gap-2 border border-yale-blue text-yale-blue px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue hover:text-page-cream transition-all disabled:opacity-50"
+          >
+            {uploadingCover ? <Loader2 size={14} className="animate-spin" /> : <ImageIcon size={14} />}
+            {uploadingCover ? 'Uploading...' : 'Cover'}
+          </button>
+
+          <input type="file" accept=".pdf,application/pdf" ref={fileInputRef} className="hidden" onChange={handleBookPDFUpload} />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingPDF}
+            className="flex items-center gap-2 bg-maple-rust text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50"
+          >
+            {uploadingPDF ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+            {uploadingPDF ? 'Uploading...' : 'Upload PDF'}
+          </button>
+        </div>
       </div>
 
       {/* 📖 Reading Progress Tracker */}

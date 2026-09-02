@@ -3,9 +3,8 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import {
   Plus, BookOpen, Trash2, AlertCircle, Search, FileText,
-  CheckCircle, Clock, X, BookMarked, TrendingUp
+  CheckCircle, Clock, X, BookMarked, TrendingUp, Image as ImageIcon
 } from 'lucide-react';
-// ❌ Removed ResearchAssistant (it now lives inside BookDetail)
 import BookDetail from '../components/BookDetail';
 import ConfirmDialog from '../components/ConfirmDialog';
 
@@ -30,8 +29,7 @@ const EMPTY_NEW_BOOK = {
   cover_color: '#132A44'
 };
 
-// Extracted and memoized so a status/search change on one card
-// doesn't force every other card in the grid to re-render.
+// ✅ Memoized BookCard that displays covers when available
 const BookCard = memo(function BookCard({ book, index, onSelect, onStatusChange, onDelete }) {
   const progress = book.total_pages && book.current_page
     ? Math.round((book.current_page / book.total_pages) * 100)
@@ -43,13 +41,24 @@ const BookCard = memo(function BookCard({ book, index, onSelect, onStatusChange,
       style={{ animationDelay: `${Math.min(index, 20) * 0.05}s` }}
       onClick={() => onSelect(book)}
     >
-      <div
-        className="absolute top-0 left-0 right-0 h-1"
-        style={{ backgroundColor: book.cover_color || '#132A44' }}
-      />
+      {/* ✅ Show real cover if available, else just the colored bar */}
+      {book.cover_url ? (
+        <div className="mb-4 -mx-5 -mt-5 rounded-t-sm overflow-hidden border-b border-coffee-cream/20 aspect-[2/3] bg-page-cream">
+          <img
+            src={book.cover_url}
+            alt={`${book.title} cover`}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+          />
+        </div>
+      ) : (
+        <div
+          className="absolute top-0 left-0 right-0 h-1"
+          style={{ backgroundColor: book.cover_color || '#132A44' }}
+        />
+      )}
 
       {book.pdf_url && (
-        <div className="absolute top-3 right-3 bg-maple-rust text-page-cream px-2 py-1 rounded-sm flex items-center gap-1">
+        <div className="absolute top-3 right-3 bg-maple-rust text-page-cream px-2 py-1 rounded-sm flex items-center gap-1 z-10">
           <FileText size={10} />
           <span className="font-label text-[0.6rem] uppercase tracking-wider">PDF</span>
         </div>
@@ -97,7 +106,7 @@ const BookCard = memo(function BookCard({ book, index, onSelect, onStatusChange,
           {TABS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
         </select>
         <button
-          onClick={() => onDelete(book)} // ✅ Pass the whole book object
+          onClick={() => onDelete(book)}
           aria-label={`Remove ${book.title} from library`}
           className="text-coffee-cream/40 hover:text-maple-rust transition-colors"
         >
@@ -121,7 +130,21 @@ export default function Library() {
   const notificationTimer = useRef(null);
 
   const [newBook, setNewBook] = useState(EMPTY_NEW_BOOK);
-  const [deleteTarget, setDeleteTarget] = useState(null); // book waiting for confirmation
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  // ✅ Cover states — INSIDE the component (was the main bug)
+  const [coverFile, setCoverFile] = useState(null);
+  const [coverPreview, setCoverPreview] = useState('');
+
+  // ✅ Cover handler — INSIDE the component
+  const handleCoverChange = (e) => {
+    const file = e.target.files[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    setCoverFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setCoverPreview(reader.result);
+    reader.readAsDataURL(file);
+  };
 
   const showNotification = useCallback((message, type = 'success') => {
     if (notificationTimer.current) clearTimeout(notificationTimer.current);
@@ -163,6 +186,19 @@ export default function Library() {
     let currentPage = newBook.current_page ? parseInt(newBook.current_page, 10) : 0;
     if (totalPages && currentPage > totalPages) currentPage = totalPages;
 
+    // 🖼️ Upload cover first (if selected)
+    let coverUrl = null;
+    if (coverFile) {
+      const ext = coverFile.name.split('.').pop();
+      const path = `${user.id}/covers/${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('pdf-documents')
+        .upload(path, coverFile, { cacheControl: '3600', upsert: false });
+      if (!upErr) {
+        coverUrl = supabase.storage.from('pdf-documents').getPublicUrl(path).data.publicUrl;
+      }
+    }
+
     const { data, error } = await supabase
       .from('books')
       .insert([{
@@ -173,22 +209,24 @@ export default function Library() {
         total_pages: totalPages,
         current_page: currentPage,
         cover_color: newBook.cover_color,
+        cover_url: coverUrl,
         status: activeTab
       }])
       .select()
       .single();
 
-      if (error) {
-      console.error('Add book error:', error);
+    if (error) {
       setError(`Could not add this book: ${error.message}`);
       showNotification('Failed to add book.', 'error');
-    }  else {
+    } else {
       setBooks(prev => [data, ...prev]);
       setIsAdding(false);
       setNewBook(EMPTY_NEW_BOOK);
+      setCoverFile(null);
+      setCoverPreview('');
       showNotification(`"${data.title}" added to your library!`);
     }
-  }, [newBook, activeTab, user, showNotification]);
+  }, [newBook, activeTab, user, showNotification, coverFile]);
 
   const updateStatus = useCallback(async (book, newStatus) => {
     setBooks(prev => prev.map(b => b.id === book.id ? { ...b, status: newStatus } : b));
@@ -206,12 +244,10 @@ export default function Library() {
     }
   }, [showNotification]);
 
-  // ✅ Open the custom modal instead of the browser popup
   const requestDelete = useCallback((book) => {
     setDeleteTarget(book);
   }, []);
 
-  // ✅ Only runs when the user confirms inside the modal
   const confirmDelete = useCallback(async () => {
     const book = deleteTarget;
     setDeleteTarget(null);
@@ -221,8 +257,7 @@ export default function Library() {
 
     const { error } = await supabase.from('books').delete().eq('id', book.id);
     if (error) {
-      // Rollback
-      fetchBooks(); 
+      fetchBooks();
       showNotification('Failed to remove book.', 'error');
     } else {
       showNotification(`"${book.title}" removed from your library.`);
@@ -263,7 +298,7 @@ export default function Library() {
   }, [books, activeTab, searchQuery]);
 
   if (selectedBook) {
-    return <BookDetail book={selectedBook} onBack={() => setSelectedBook(null)} />;
+    return <BookDetail book={selectedBook} onBack={() => { setSelectedBook(null); fetchBooks(); }} />;
   }
 
   return (
@@ -325,8 +360,6 @@ export default function Library() {
         </div>
       </div>
 
-      {/* ❌ Removed <ResearchAssistant /> because the AI Librarian now lives inside BookDetail.jsx */}
-
       {error && (
         <div className="flex items-center gap-2 p-3 bg-maple-rust/10 border border-maple-rust/30 rounded-sm text-maple-rust text-sm font-body animate-fade-in-up">
           <AlertCircle size={16} /> {error}
@@ -380,6 +413,19 @@ export default function Library() {
             />
             <span className="font-body text-xs text-coffee-cream italic">{newBook.cover_color}</span>
           </div>
+
+          {/* ✅ NEW: Cover image upload with live preview */}
+          <div className="flex items-center gap-3">
+            <label className="font-label text-xs uppercase tracking-wider text-coffee-cream">Cover Image:</label>
+            <input type="file" accept="image/*" id="cover-input" className="hidden" onChange={handleCoverChange} />
+            <label htmlFor="cover-input" className="cursor-pointer flex items-center gap-2 px-3 py-2 border border-coffee-cream/30 rounded-sm font-label text-xs uppercase tracking-wider text-coffee-cream hover:bg-coffee-cream/10 transition-colors">
+              <ImageIcon size={14} /> {coverPreview ? 'Change cover' : 'Upload cover'}
+            </label>
+            {coverPreview && (
+              <img src={coverPreview} alt="Cover preview" className="w-10 h-14 object-cover rounded-sm border border-coffee-cream/20 shadow-cozy" />
+            )}
+          </div>
+
           <div className="flex justify-end">
             <button type="submit" className="bg-maple-rust text-page-cream px-6 py-3 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-colors">
               Add to Shelf
@@ -438,19 +484,18 @@ export default function Library() {
               index={i}
               onSelect={setSelectedBook}
               onStatusChange={updateStatus}
-              onDelete={requestDelete} // ✅ FIXED: Was passing undefined `deleteBook`
+              onDelete={requestDelete}
             />
           ))}
         </div>
       )}
 
-      {/* ✅ Added the Custom Confirmation Modal */}
       <ConfirmDialog
         open={!!deleteTarget}
         title="Remove this book?"
         message={
           <>
-            “<span className="italic text-library-ink">{deleteTarget?.title}</span>” will be
+            "<span className="italic text-library-ink">{deleteTarget?.title}</span>" will be
             removed from your library along with its notes. This cannot be undone.
           </>
         }
