@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
-import { ChevronLeft, ChevronRight, CheckCircle, Circle, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CheckCircle, Circle, Trash2, Timer } from 'lucide-react';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -13,26 +13,50 @@ export default function Tasks() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState([]);
+  const [sessions, setSessions] = useState([]); // ✅ NEW: sessions pour calculer le temps passé
   const [viewDate, setViewDate] = useState(new Date());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
-    const fetchTasks = async () => {
-      const { data } = await supabase
-        .from('tasks')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true });
-      setTasks(data || []);
+    const fetchData = async () => {
+      const [tasksRes, sessionsRes] = await Promise.all([
+        supabase
+          .from('tasks')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('pomodoro_sessions')
+          .select('task_id, goal_task_id, duration')
+          .eq('user_id', user.id)
+          .eq('completed', true)
+      ]);
+      setTasks(tasksRes.data || []);
+      setSessions(sessionsRes.data || []);
       setLoading(false);
     };
-    fetchTasks();
+    fetchData();
   }, [user]);
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
   const monthName = viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  // ⏱️ Temps total passé par task_id (en minutes)
+  const timeSpentByTaskId = {};
+  sessions.forEach(s => {
+    if (s.task_id) timeSpentByTaskId[s.task_id] = (timeSpentByTaskId[s.task_id] || 0) + (s.duration || 0);
+  });
+
+  const formatTimeSpent = (minutes) => {
+    if (!minutes || minutes < 1) return null;
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    if (h > 0 && m > 0) return `${h}h${String(m).padStart(2, '0')}m`;
+    if (h > 0) return `${h}h`;
+    return `${m}m`;
+  };
 
   // Group tasks by due_date
   const byDate = {};
@@ -117,13 +141,19 @@ export default function Tasks() {
                 {dayTasks.slice(0, 2).map((t) => (
                   <div
                     key={t.id}
-                    className={`truncate text-[0.65rem] px-1.5 py-0.5 rounded-sm font-body ${
+                    className={`text-[0.65rem] px-1.5 py-0.5 rounded-sm font-body flex items-center gap-1 ${
                       t.status === 'done'
                         ? 'bg-porch-sage/20 text-porch-sage line-through'
                         : 'bg-yale-blue/10 text-yale-blue'
                     }`}
                   >
-                    {t.title}
+                    <span className="truncate flex-1">{t.title}</span>
+                    {timeSpentByTaskId[t.id] && (
+                      <span className="shrink-0 flex items-center gap-0.5 text-[0.55rem] font-medium">
+                        <Timer size={8} />
+                        {formatTimeSpent(timeSpentByTaskId[t.id])}
+                      </span>
+                    )}
                   </div>
                 ))}
                 {dayTasks.length > 2 && (
@@ -146,9 +176,17 @@ export default function Tasks() {
                 <button onClick={() => toggleTask(t)} className={t.status === 'done' ? 'text-porch-sage' : 'text-coffee-cream hover:text-porch-sage'}>
                   {t.status === 'done' ? <CheckCircle size={18} /> : <Circle size={18} />}
                 </button>
-                <span className={`flex-1 font-body text-sm ${t.status === 'done' ? 'line-through text-coffee-cream' : 'text-library-ink'}`}>
-                  {t.title}
-                </span>
+                <div className="flex-1 flex items-center gap-2">
+                  <span className={`font-body text-sm ${t.status === 'done' ? 'line-through text-coffee-cream' : 'text-library-ink'}`}>
+                    {t.title}
+                  </span>
+                  {timeSpentByTaskId[t.id] && (
+                    <span className="shrink-0 flex items-center gap-1 px-2 py-0.5 bg-yale-blue/10 text-yale-blue rounded-sm font-label text-[0.6rem] uppercase tracking-wider">
+                      <Timer size={10} />
+                      {formatTimeSpent(timeSpentByTaskId[t.id])}
+                    </span>
+                  )}
+                </div>
                 <button onClick={() => deleteTask(t.id)} className="text-coffee-cream/40 hover:text-maple-rust">
                   <Trash2 size={14} />
                 </button>

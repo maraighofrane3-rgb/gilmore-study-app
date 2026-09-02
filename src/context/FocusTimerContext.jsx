@@ -12,6 +12,7 @@ export function FocusTimerProvider({ children }) {
   const [isRunning, setIsRunning] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [selectedGoalId, setSelectedGoalId] = useState(null);
+  const [selectedGoalTaskId, setSelectedGoalTaskId] = useState(null); // ✅ NEW: task chosen from a goal
   const [completedAt, setCompletedAt] = useState(null);
   const [saveError, setSaveError] = useState(null);
 
@@ -24,13 +25,11 @@ export function FocusTimerProvider({ children }) {
 
   const recordSession = async (minutes) => {
     if (user) {
-      // NOTE: `goal_id` assumes a `goal_id` column on pomodoro_sessions
-      // (nullable uuid, references goals.id). Add it via migration if
-      // it doesn't exist yet — see the note in chat.
       const { error } = await supabase.from('pomodoro_sessions').insert([{
         user_id: user.id,
-        task_id: selectedTaskId || null,
-        goal_id: selectedGoalId || null,
+        task_id: selectedTaskId || null,            // only IDs from the "tasks" table
+        goal_id: selectedGoalId || null,            // IDs from "goals"
+        goal_task_id: selectedGoalTaskId || null,   // ✅ IDs from "goal_tasks" (module 5, etc.)
         duration: minutes,
         completed: true,
       }]);
@@ -70,11 +69,9 @@ export function FocusTimerProvider({ children }) {
   const changeDuration = (min) => { setDurationMin(min); setIsRunning(false); setTimeLeft(min * 60); };
 
   // ✅ DONE: bank the EXACT elapsed time, even if the session isn't finished.
-  // No rounding, no forced minimum — whatever time really passed gets
-  // recorded, down to the second (as fractional minutes).
   const done = () => {
     const elapsedSeconds = durationMin * 60 - timeLeft;
-    if (elapsedSeconds <= 0) return; // nothing studied yet
+    if (elapsedSeconds <= 0) return;
     const minutes = elapsedSeconds / 60;
     setIsRunning(false);
     recordSession(minutes);
@@ -82,8 +79,11 @@ export function FocusTimerProvider({ children }) {
 
   return (
     <FocusTimerContext.Provider value={{
-      durationMin, timeLeft, isRunning, selectedTaskId, selectedGoalId, completedAt, saveError,
-      setSelectedTaskId, setSelectedGoalId, start, pause, reset, changeDuration, done,
+      durationMin, timeLeft, isRunning,
+      selectedTaskId, selectedGoalId, selectedGoalTaskId,
+      completedAt, saveError,
+      setSelectedTaskId, setSelectedGoalId, setSelectedGoalTaskId,
+      start, pause, reset, changeDuration, done,
     }}>
       {children}
     </FocusTimerContext.Provider>

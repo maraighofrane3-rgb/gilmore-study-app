@@ -36,12 +36,13 @@ export default function Focus() {
     start, pause, reset, changeDuration,
     selectedTaskId, setSelectedTaskId,
     selectedGoalId, setSelectedGoalId,
+    selectedGoalTaskId, setSelectedGoalTaskId,
     completedAt, done,
   } = useFocusTimer();
 
   const [tasks, setTasks] = useState([]);
   const [goals, setGoals] = useState([]);
-  const [goalTasks, setGoalTasks] = useState([]); // ✅ NEW: tasks linked to goals
+  const [goalTasks, setGoalTasks] = useState([]);
   const [focusMode, setFocusMode] = useState('task');
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [weekMinutes, setWeekMinutes] = useState(0);
@@ -104,18 +105,21 @@ export default function Focus() {
     await supabase.from('profiles').update({ daily_goal_hours: v }).eq('id', user.id);
   };
 
-  // ✅ When switching mode or changing goal, clear the task selection
+  // ✅ Reset ALL three selections when switching modes or goal
   const switchToTask = () => {
     setFocusMode('task');
     setSelectedGoalId(null);
+    setSelectedGoalTaskId(null);   // ✅ FIX
   };
   const switchToGoal = () => {
     setFocusMode('goal');
     setSelectedTaskId(null);
+    setSelectedGoalTaskId(null);   // ✅ FIX
   };
   const handleGoalSelect = (goalId) => {
     setSelectedGoalId(goalId || null);
-    setSelectedTaskId(null); // reset task when goal changes
+    setSelectedTaskId(null);
+    setSelectedGoalTaskId(null);   // ✅ FIX
   };
 
   const goalMinutes = dailyGoal * 60;
@@ -180,7 +184,7 @@ export default function Focus() {
           </button>
         </div>
 
-        {/* TASK mode */}
+        {/* TASK mode — uses selectedTaskId (table "tasks") */}
         {focusMode === 'task' && (
           <div className="flex items-center gap-2 bg-page-cream border border-coffee-cream/20 rounded-sm px-4 py-3">
             <BookOpen size={18} className="text-coffee-cream shrink-0" />
@@ -197,7 +201,7 @@ export default function Focus() {
           </div>
         )}
 
-        {/* GOAL mode — goal select + task chips bar */}
+        {/* GOAL mode — uses selectedGoalTaskId (table "goal_tasks") */}
         {focusMode === 'goal' && (
           <div className="space-y-3 animate-fade-in-up">
             {/* Goal select */}
@@ -215,7 +219,7 @@ export default function Focus() {
               </select>
             </div>
 
-            {/* ✅ Task chips bar — appears right after a goal is selected */}
+            {/* ✅ Task chips bar — uses selectedGoalTaskId */}
             {selectedGoalId && (
               <div className="space-y-2 animate-fade-in-up">
                 <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream flex items-center gap-1.5">
@@ -233,9 +237,9 @@ export default function Focus() {
                       <button
                         key={t.id}
                         type="button"
-                        onClick={() => setSelectedTaskId(selectedTaskId === t.id ? null : t.id)}
+                        onClick={() => setSelectedGoalTaskId(selectedGoalTaskId === t.id ? null : t.id)}
                         className={`px-3 py-2 rounded-sm font-body text-xs border transition-all ${
-                          selectedTaskId === t.id
+                          selectedGoalTaskId === t.id
                             ? 'bg-maple-rust text-page-cream border-maple-rust shadow-sm'
                             : 'bg-page-cream text-library-ink border-coffee-cream/30 hover:border-maple-rust/50 hover:text-maple-rust'
                         }`}
@@ -246,14 +250,14 @@ export default function Focus() {
                   </div>
                 )}
 
-                {/* Summary of what you're about to focus on */}
-                {selectedTaskId && (
+                {/* Summary — uses selectedGoalTaskId */}
+                {selectedGoalTaskId && (
                   <div className="bg-page-cream/50 p-3 rounded-sm border-l-4 border-gilmore-gold">
                     <p className="font-label text-[0.6rem] uppercase tracking-wider text-gilmore-gold mb-0.5">
                       Focus on
                     </p>
                     <p className="font-display text-sm text-yale-blue">
-                      {tasksOfSelectedGoal.find(t => t.id === selectedTaskId)?.title}
+                      {tasksOfSelectedGoal.find(t => t.id === selectedGoalTaskId)?.title}
                     </p>
                     <p className="font-body text-xs text-coffee-cream italic">
                       from: {goals.find(g => g.id === selectedGoalId)?.title}

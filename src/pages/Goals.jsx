@@ -5,7 +5,7 @@ import { useFocusTimer } from '../context/FocusTimerContext';
 import {
   Plus, Target, Trash2, ArrowUp, BookOpen, Search, CheckCircle,
   Circle, Calendar, Clock, X, ListChecks, Sparkles, ChevronDown,
-  ChevronRight, Flame, Trophy, FolderOpen
+  ChevronRight, Flame, Trophy, FolderOpen, Timer
 } from 'lucide-react';
 import ConfirmDialog from '../components/ConfirmDialog';
 
@@ -31,7 +31,7 @@ const STATUSES = [
 // 🧠 MEMOIZED TASK ROW
 // ============================================
 
-const TaskRow = memo(function TaskRow({ task, onToggle, onDelete, onFocus }) {
+const TaskRow = memo(function TaskRow({ task, onToggle, onDelete, onFocus, timeSpent, formatTimeSpent }) {
   return (
     <div className="flex items-center gap-2 group py-1.5 px-2 rounded-sm hover:bg-page-cream/50 transition-colors">
       <button
@@ -47,6 +47,12 @@ const TaskRow = memo(function TaskRow({ task, onToggle, onDelete, onFocus }) {
       <span className={`flex-1 font-body text-sm ${task.completed ? 'line-through text-coffee-cream/50' : 'text-library-ink'}`}>
         {task.title}
       </span>
+      {timeSpent && (
+        <span className="shrink-0 flex items-center gap-1 px-2 py-0.5 bg-yale-blue/10 text-yale-blue rounded-sm font-label text-[0.6rem] uppercase tracking-wider">
+          <Timer size={10} />
+          {formatTimeSpent(timeSpent)}
+        </span>
+      )}
       <button
         onClick={() => onFocus(task)}
         className="opacity-0 group-hover:opacity-100 flex items-center gap-1 px-2 py-1 rounded-sm bg-gilmore-gold/20 text-gilmore-gold hover:bg-gilmore-gold hover:text-yale-blue font-label text-[0.6rem] uppercase tracking-wider transition-all"
@@ -67,7 +73,7 @@ const TaskRow = memo(function TaskRow({ task, onToggle, onDelete, onFocus }) {
 // 🧠 MEMOIZED GOAL CARD
 // ============================================
 
-const GoalCard = memo(function GoalCard({ goal, index, tasks, onAddTask, onToggleTask, onDeleteTask, onFocusTask, onDeleteGoal }) {
+const GoalCard = memo(function GoalCard({ goal, index, tasks, timeSpentByGoalTaskId, formatTimeSpent, onAddTask, onToggleTask, onDeleteTask, onFocusTask, onDeleteGoal }) {
   const [expanded, setExpanded] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [addingTask, setAddingTask] = useState(false);
@@ -164,6 +170,8 @@ const GoalCard = memo(function GoalCard({ goal, index, tasks, onAddTask, onToggl
                   onToggle={onToggleTask}
                   onDelete={onDeleteTask}
                   onFocus={onFocusTask}
+                  timeSpent={timeSpentByGoalTaskId[task.id]}
+                  formatTimeSpent={formatTimeSpent}
                 />
               ))
             )}
@@ -214,10 +222,11 @@ const GoalCard = memo(function GoalCard({ goal, index, tasks, onAddTask, onToggl
 
 export default function Goals() {
   const { user } = useAuth();
-  const { setTaskContext } = useFocusTimer(); // ⚡ Link to Focus session
+  const { setTaskContext } = useFocusTimer();
 
   const [goals, setGoals] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [goalTaskSessions, setGoalTaskSessions] = useState([]); // ✅ NEW
   const [isAdding, setIsAdding] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -255,13 +264,19 @@ export default function Goals() {
   const fetchGoals = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-    const [goalsRes, tasksRes] = await Promise.all([
+    const [goalsRes, tasksRes, sessionsRes] = await Promise.all([
       supabase.from('goals').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
       supabase.from('goal_tasks').select('*').eq('user_id', user.id).order('created_at', { ascending: true }),
+      supabase.from('pomodoro_sessions')
+        .select('goal_task_id, duration')
+        .eq('user_id', user.id)
+        .eq('completed', true)
+        .not('goal_task_id', 'is', null)
     ]);
 
     if (!goalsRes.error) setGoals(goalsRes.data || []);
     if (!tasksRes.error) setTasks(tasksRes.data || []);
+    if (!sessionsRes.error) setGoalTaskSessions(sessionsRes.data || []);
     setLoading(false);
   }, [user]);
 
@@ -302,6 +317,24 @@ export default function Goals() {
       return matchesCategory && matchesStatus && matchesSearch;
     });
   }, [goals, searchQuery, activeCategory, activeStatus]);
+
+  // ⏱️ Temps total passé par goal_task_id
+  const timeSpentByGoalTaskId = useMemo(() => {
+    const totals = {};
+    goalTaskSessions.forEach(s => {
+      if (s.goal_task_id) totals[s.goal_task_id] = (totals[s.goal_task_id] || 0) + (s.duration || 0);
+    });
+    return totals;
+  }, [goalTaskSessions]);
+
+  const formatTimeSpent = useCallback((minutes) => {
+    if (!minutes || minutes < 1) return null;
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    if (h > 0 && m > 0) return `${h}h${String(m).padStart(2, '0')}m`;
+    if (h > 0) return `${h}h`;
+    return `${m}m`;
+  }, []);
 
   // ============================================
   // 🎯 GOAL CRUD
@@ -398,7 +431,6 @@ export default function Goals() {
   const handleToggleTask = useCallback(async (task) => {
     const newCompleted = !task.completed;
 
-    // Optimistic update
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: newCompleted } : t));
 
     try {
@@ -409,7 +441,6 @@ export default function Goals() {
 
       if (error) throw error;
 
-      // Auto-update goal progress based on completed tasks ratio
       const goalTasks = tasks.filter(t => t.goal_id === task.goal_id);
       const goal = goals.find(g => g.id === task.goal_id);
       if (goal) {
@@ -418,7 +449,6 @@ export default function Goals() {
         ).length;
         const totalTasks = goalTasks.length;
 
-        // Map tasks completion ratio to goal target
         const newValue = Math.round((completedCount / totalTasks) * goal.target_value);
         const newStatus = newValue >= goal.target_value ? 'completed' : 'active';
 
@@ -432,7 +462,6 @@ export default function Goals() {
         ));
       }
     } catch (err) {
-      // Rollback
       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: task.completed } : t));
       showNotification('Failed to update task.', 'error');
     }
@@ -442,7 +471,6 @@ export default function Goals() {
     setDeleteTarget({ type: 'task', data: task });
   }, []);
 
-  // ⚡ LINK TO FOCUS SESSION
   const handleFocusTask = useCallback((task) => {
     const goal = goals.find(g => g.id === task.goal_id);
     if (setTaskContext) {
@@ -453,7 +481,6 @@ export default function Goals() {
         goalId: task.goal_id
       });
     }
-    // Navigate to Focus page
     window.location.href = '/focus';
   }, [goals, setTaskContext]);
 
@@ -679,6 +706,8 @@ export default function Goals() {
               goal={goal}
               index={i}
               tasks={tasks}
+              timeSpentByGoalTaskId={timeSpentByGoalTaskId}
+              formatTimeSpent={formatTimeSpent}
               onAddTask={handleAddTask}
               onToggleTask={handleToggleTask}
               onDeleteTask={requestDeleteTask}

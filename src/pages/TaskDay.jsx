@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
-import { ArrowLeft, Plus, Trash2, CheckCircle, Circle } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, CheckCircle, Circle, Timer } from 'lucide-react';
 
 export default function TaskDay() {
-  const { date } = useParams(); // e.g. "2026-08-31"
+  const { date } = useParams();
   const { user } = useAuth();
   const [tasks, setTasks] = useState([]);
+  const [sessions, setSessions] = useState([]); // ✅ NEW
   const [title, setTitle] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -18,17 +19,43 @@ export default function TaskDay() {
   useEffect(() => {
     if (!user) return;
     const fetchDay = async () => {
-      const { data } = await supabase
-        .from('tasks')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('due_date', date)
-        .order('created_at', { ascending: true });
-      setTasks(data || []);
+      const [tasksRes, sessionsRes] = await Promise.all([
+        supabase
+          .from('tasks')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('due_date', date)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('pomodoro_sessions')
+          .select('task_id, goal_task_id, duration')
+          .eq('user_id', user.id)
+          .eq('completed', true)
+      ]);
+      setTasks(tasksRes.data || []);
+      setSessions(sessionsRes.data || []);
       setLoading(false);
     };
     fetchDay();
   }, [user, date]);
+
+  // ⏱️ Temps total passé par task_id
+  const timeSpentByTaskId = useMemo(() => {
+    const totals = {};
+    sessions.forEach(s => {
+      if (s.task_id) totals[s.task_id] = (totals[s.task_id] || 0) + (s.duration || 0);
+    });
+    return totals;
+  }, [sessions]);
+
+  const formatTimeSpent = (minutes) => {
+    if (!minutes || minutes < 1) return null;
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    if (h > 0 && m > 0) return `${h}h${String(m).padStart(2, '0')}m`;
+    if (h > 0) return `${h}h`;
+    return `${m}m`;
+  };
 
   const addTask = async (e) => {
     e.preventDefault();
@@ -95,9 +122,17 @@ export default function TaskDay() {
               <button onClick={() => toggleTask(t)} className={t.status === 'done' ? 'text-porch-sage' : 'text-coffee-cream hover:text-porch-sage transition-colors'}>
                 {t.status === 'done' ? <CheckCircle size={20} /> : <Circle size={20} />}
               </button>
-              <span className={`flex-1 font-body text-sm ${t.status === 'done' ? 'line-through text-coffee-cream' : 'text-library-ink'}`}>
-                {t.title}
-              </span>
+              <div className="flex-1 flex items-center gap-2">
+                <span className={`font-body text-sm ${t.status === 'done' ? 'line-through text-coffee-cream' : 'text-library-ink'}`}>
+                  {t.title}
+                </span>
+                {timeSpentByTaskId[t.id] && (
+                  <span className="shrink-0 flex items-center gap-1 px-2 py-0.5 bg-yale-blue/10 text-yale-blue rounded-sm font-label text-[0.6rem] uppercase tracking-wider">
+                    <Timer size={10} />
+                    {formatTimeSpent(timeSpentByTaskId[t.id])}
+                  </span>
+                )}
+              </div>
               <button onClick={() => deleteTask(t.id)} className="text-coffee-cream/40 hover:text-maple-rust opacity-0 group-hover:opacity-100 transition-opacity">
                 <Trash2 size={16} />
               </button>
