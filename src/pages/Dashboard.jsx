@@ -26,6 +26,28 @@ function formatHMS(totalSeconds) {
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+// ☕ Tiny animated coffee for the greeting
+function MiniCoffee() {
+  return (
+    <span className="inline-block align-baseline ml-2 transition-transform hover:-rotate-6" aria-hidden="true">
+      <svg width="30" height="30" viewBox="0 0 40 40">
+        {/* steam */}
+        <g stroke="#C89B7B" strokeWidth="2.5" strokeLinecap="round" fill="none">
+          <path className="steam" d="M15 14c-2-3 2-4 0-8" />
+          <path className="steam steam-2" d="M22 13c-2-3 2-4 0-8" />
+        </g>
+        {/* cup */}
+        <path d="M8 17h22c0 8-5 13-11 13S8 25 8 17z" fill="#B4552D" />
+        <path d="M30 19c4-1 6 2 5 5s-4 4-7 4" fill="none" stroke="#A0522D" strokeWidth="3" strokeLinecap="round" />
+        <ellipse cx="19" cy="17" rx="11" ry="3" fill="#E8DCC3" />
+        <ellipse cx="19" cy="17" rx="8.5" ry="2" fill="#3B2314" />
+        {/* saucer */}
+        <ellipse cx="19" cy="32" rx="14" ry="3" fill="#F0EAD8" />
+      </svg>
+    </span>
+  );
+}
+
 export default function Dashboard() {
   const { user, signOut } = useAuth();
   const { isRunning, timeLeft, durationMin, completedAt } = useFocusTimer();
@@ -94,6 +116,7 @@ export default function Dashboard() {
           </p>
           <h1 className="font-display text-3xl text-yale-blue">
             {greeting}, <span className="italic text-maple-rust">{firstName}</span>.
+            <MiniCoffee />
           </h1>
         </div>
         <button

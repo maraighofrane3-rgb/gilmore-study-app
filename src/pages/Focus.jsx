@@ -29,6 +29,178 @@ function formatMinutes(totalMin) {
   return `${s}s`;
 }
 
+// ============================================
+// 🕯️ AMBIENT SCENE — melts completely when the daily goal is hit
+// ============================================
+function CandleAndCoffee({ progress, isRunning }) {
+  const melted = progress >= 1; // 🎉 daily goal reached
+  const waxH = melted ? 0 : Math.max(16, Math.round(130 * (1 - progress)));
+  const waxTop = 200 - waxH;
+  const B = waxTop - 9;
+  const flameOn = isRunning && !melted;
+  const minY = Math.max(-6, B - (flameOn ? 62 : 14));
+
+  return (
+    <div className="flex items-end justify-center gap-16 select-none" aria-hidden="true">
+      {/* 🕯️ Candle */}
+      <div className="flex flex-col items-center">
+        <svg width="150" height={240 - minY} viewBox={`0 ${minY} 150 ${240 - minY}`}>
+          <defs>
+            <linearGradient id="waxGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stopColor="#DCCEAE" />
+              <stop offset=".45" stopColor="#F7F0DE" />
+              <stop offset="1" stopColor="#CDBD97" />
+            </linearGradient>
+            <linearGradient id="flameOuter" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#F2B23E" />
+              <stop offset="1" stopColor="#C4711D" />
+            </linearGradient>
+            <linearGradient id="flameMid" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#FBD98A" />
+              <stop offset="1" stopColor="#EFA93C" />
+            </linearGradient>
+            <radialGradient id="glowGrad">
+              <stop offset="0" stopColor="#F6C866" stopOpacity=".5" />
+              <stop offset="1" stopColor="#F6C866" stopOpacity="0" />
+            </radialGradient>
+            <linearGradient id="brassGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#E0B45C" />
+              <stop offset="1" stopColor="#7E5D1C" />
+            </linearGradient>
+          </defs>
+
+          {/* warm glow */}
+          {flameOn && (
+            <circle className="candle-glow" cx="75" cy={B - 18} r="40" fill="url(#glowGrad)" />
+          )}
+
+          {/* twinkling embers */}
+          {flameOn && (
+            <g fill="#F2C86B">
+              <circle className="sparkle" cx="52" cy={B - 30} r="2" />
+              <circle className="sparkle sparkle-2" cx="98" cy={B - 40} r="1.6" />
+              <circle className="sparkle sparkle-3" cx="88" cy={B - 14} r="1.4" />
+            </g>
+          )}
+
+          {/* flame */}
+          <g className={flameOn ? 'candle-flame' : 'opacity-0'} style={{ transformOrigin: `75px ${B}px` }}>
+            <path d={`M75 ${B - 38} C83 ${B - 24} 88 ${B - 16} 88 ${B - 9} A13 13 0 0 1 62 ${B - 9} C62 ${B - 16} 67 ${B - 24} 75 ${B - 38} Z`} fill="url(#flameOuter)" />
+            <path d={`M75 ${B - 26} C80 ${B - 17} 83 ${B - 12} 83 ${B - 7} A8 8 0 0 1 67 ${B - 7} C67 ${B - 12} 70 ${B - 17} 75 ${B - 26} Z`} fill="url(#flameMid)" />
+            <path d={`M75 ${B - 14} C77.5 ${B - 9} 79 ${B - 6} 79 ${B - 4} A4 4 0 0 1 71 ${B - 4} C71 ${B - 6} 72.5 ${B - 9} 75 ${B - 14} Z`} fill="#FBF3DC" />
+            <ellipse cx="75" cy={B - 3} rx="4.5" ry="2.5" fill="#7A9CC6" opacity=".55" />
+          </g>
+
+          {/* wick + ember tip (gone once melted) */}
+          {!melted && (
+            <>
+              <path d={`M75 ${waxTop} q1.5 -5 0 -9`} stroke="#3E2B20" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+              {flameOn && <circle cx="75" cy={B} r="2" fill="#FF9C3F" />}
+            </>
+          )}
+
+          {/* wax body (hidden once melted) */}
+          {!melted && (
+            <>
+              <rect x="49" y={waxTop} width="52" height={waxH} rx="9" fill="url(#waxGrad)" />
+              <rect x="57" y={waxTop + 8} width="6" height={Math.max(10, waxH - 26)} rx="3" fill="#FFFFFF" opacity=".28" />
+              <ellipse cx="75" cy={waxTop + 1} rx="26" ry="6" fill="#EFE6CC" />
+              <ellipse cx="75" cy={waxTop + 2} rx="19" ry="3.8" fill="#CDBD97" opacity=".7" />
+              {flameOn && (
+                <ellipse cx="75" cy={waxTop + 2} rx="11" ry="2.4" fill="#F2C866" opacity=".55" />
+              )}
+              {progress > 0.03 && (
+                <>
+                  <path d={`M52 ${waxTop + 4} q-4 14 0 26 q4 -12 0 -26`} fill="#F7F0DE" />
+                  <path d={`M98 ${waxTop + 6} q3.5 12 0 20 q-3.5 -8 0 -20`} fill="#DCCEAE" />
+                  <path d={`M60 ${waxTop + 10} q-3 9 0 15 q3 -6 0 -15`} fill="#EFE6CC" />
+                </>
+              )}
+            </>
+          )}
+
+          {/* melted puddle — grows all day, maxes at the goal */}
+          {(progress > 0.1 || melted) && (
+            <>
+              <ellipse cx="75" cy="198" rx={melted ? 46 : 26 + progress * 14} ry={melted ? 6 : 4.5} fill="#EFE6CC" opacity=".95" />
+              <ellipse cx="75" cy="197" rx={melted ? 30 : 16 + progress * 8} ry={melted ? 3.5 : 2.5} fill="#DCCEAE" opacity=".8" />
+            </>
+          )}
+
+          {/* smoke wisps once fully melted */}
+          {melted && (
+            <g stroke="#B9AE9C" strokeWidth="2.5" strokeLinecap="round" fill="none">
+              <path className="steam" d="M70 192c-4-5 4-7 0-13" />
+              <path className="steam steam-2" d="M80 190c-4-5 4-7 0-13" />
+            </g>
+          )}
+
+          {/* ornate brass holder */}
+          <ellipse cx="75" cy="200" rx="32" ry="7" fill="url(#brassGrad)" />
+          <rect x="67" y="202" width="16" height="10" rx="3" fill="#7E5D1C" />
+          <ellipse cx="75" cy="206" rx="13" ry="3" fill="#E0B45C" opacity=".8" />
+          <ellipse cx="75" cy="214" rx="38" ry="8" fill="url(#brassGrad)" />
+          <ellipse cx="75" cy="213" rx="30" ry="5" fill="none" stroke="#5E4515" strokeWidth="1" opacity=".45" />
+          <ellipse cx="75" cy="226" rx="48" ry="6" fill="#3B2314" opacity=".08" />
+        </svg>
+        <p className="font-body italic text-sm text-coffee-cream mt-2">
+          {melted
+            ? 'the candle gave everything — goal complete!'
+            : progress === 0
+            ? 'the wick is waiting'
+            : `${Math.round(progress * 100)}% of today's goal burned`}
+        </p>
+      </div>
+
+      {/* ☕ Coffee on its book stack (unchanged) */}
+      <div className="flex flex-col items-center">
+        <svg width="200" height="176" viewBox="0 0 200 176">
+          <defs>
+            <linearGradient id="cupGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stopColor="#8A3A1C" />
+              <stop offset=".45" stopColor="#B4552D" />
+              <stop offset="1" stopColor="#7E3418" />
+            </linearGradient>
+          </defs>
+
+          <g stroke="#C89B7B" strokeWidth="4.5" strokeLinecap="round" fill="none" className={isRunning ? '' : 'opacity-0'}>
+            <path className="steam" d="M76 62c-6-9 6-13 0-24c-5-9 5-13 0-22" />
+            <path className="steam steam-2" d="M98 58c-6-10 6-14 0-26c-5-10 5-14 0-24" />
+            <path className="steam steam-3" d="M120 62c-6-9 6-13 0-24c-5-9 5-13 0-22" />
+          </g>
+
+          <path d="M50 78h96c0 32-19 56-48 56s-48-24-48-56z" fill="url(#cupGrad)" />
+          <ellipse cx="72" cy="96" rx="8" ry="20" fill="#FFFFFF" opacity=".14" />
+          <path d="M146 84c17-2 24 8 22 17s-15 17-27 17" fill="none" stroke="#A0522D" strokeWidth="11" strokeLinecap="round" />
+          <ellipse cx="98" cy="78" rx="48" ry="11" fill="#E8DCC3" />
+          <ellipse cx="98" cy="78" rx="40" ry="8" fill="#3B2314" />
+          {isRunning && (
+            <ellipse cx="80" cy="76" rx="7" ry="2" fill="#E8A33D" opacity=".35" />
+          )}
+          <path d="M98 82c-3-4-9-3.5-9 1c0 4 5 6 9 9c4-3 9-5 9-9c0-4.5-6-5-9-1z" fill="#E8DCC3" opacity=".9" />
+
+          <ellipse cx="98" cy="140" rx="60" ry="12" fill="#F0EAD8" />
+          <ellipse cx="98" cy="138" rx="38" ry="7" fill="#D9CDB0" />
+          <g fill="#C89B3C">
+            <ellipse cx="150" cy="138" rx="7" ry="3.5" />
+            <rect x="155" y="136.5" width="16" height="3" rx="1.5" />
+          </g>
+
+          <rect x="56" y="149" width="84" height="8" rx="2" fill="#132A44" />
+          <rect x="132" y="150.5" width="6" height="5" rx="1" fill="#F0EAD8" />
+          <rect x="64" y="157" width="72" height="8" rx="2" fill="#A0522D" />
+          <rect x="128" y="158.5" width="6" height="5" rx="1" fill="#F0EAD8" />
+
+          <ellipse cx="98" cy="169" rx="70" ry="6" fill="#3B2314" opacity=".08" />
+        </svg>
+        <p className="font-body italic text-sm text-coffee-cream mt-2">
+          {isRunning ? 'steam rising — sip slowly' : "Luke's coffee, waiting for you"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function Focus() {
   const { user } = useAuth();
   const {
@@ -270,10 +442,18 @@ export default function Focus() {
         )}
       </div>
 
-      {/* Timer */}
-      <div className="text-center py-6">
+        {/* Timer */}
+      <div className="text-center pt-6 pb-0">
         <p className="font-display text-8xl md:text-9xl text-yale-blue tracking-tight">{formatHMS(timeLeft)}</p>
         <p className="font-label text-sm uppercase tracking-widest text-coffee-cream mt-2">Focus Time</p>
+      </div>
+
+            {/* 🕯️ Ambient scene — melts with your DAILY GOAL, not the session */}
+      <div className="-mt-10">
+        <CandleAndCoffee
+          progress={Math.min(1, totalSeconds / (goalMinutes * 60))}
+          isRunning={isRunning}
+        />
       </div>
 
       {/* Durations */}

@@ -117,6 +117,22 @@ const BookCard = memo(function BookCard({ book, index, onSelect, onStatusChange,
   );
 });
 
+// 📖 Aesthetic open book with a turning page
+function FlippingBook() {
+  return (
+    <div className="fb-scene mb-1" aria-hidden="true">
+      <div className="fb-book">
+        <div className="fb-cover" />
+        <div className="fb-page fb-left" />
+        <div className="fb-page fb-right" />
+        <div className="fb-ribbon" />
+        <div className="fb-spine" />
+        <div className="fb-page fb-flip" />
+      </div>
+    </div>
+  );
+}
+
 export default function Library() {
   const { user } = useAuth();
   const [books, setBooks] = useState([]);
@@ -314,12 +330,16 @@ export default function Library() {
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 animate-fade-in-up">
-        <div>
-          <p className="eyebrow mb-2">The Collection</p>
-          <h1 className="font-display text-4xl text-yale-blue">
-            My <span className="italic text-maple-rust">Library</span>.
-          </h1>
+           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 animate-fade-in-up">
+        {/* title + book grouped together, side by side */}
+        <div className="flex items-end gap-6">
+          <div>
+            <p className="eyebrow mb-2">The Collection</p>
+            <h1 className="font-display text-4xl text-yale-blue">
+              My <span className="italic text-maple-rust">Library</span>.
+            </h1>
+          </div>
+          <FlippingBook />
         </div>
         <button
           onClick={() => setIsAdding(!isAdding)}
