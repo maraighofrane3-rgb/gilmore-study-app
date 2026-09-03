@@ -8,9 +8,7 @@ function loadStore() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 const FocusTimerContext = createContext(null);
@@ -19,7 +17,6 @@ export function FocusTimerProvider({ children }) {
   const { user } = useAuth();
   const stored = useRef(loadStore()).current;
 
-  // ---------- state (restored from localStorage) ----------
   const [durationMin, setDurationMin] = useState(stored?.durationMin || 25);
   const [endAt, setEndAt] = useState(stored?.endAt || null);
   const [isRunning, setIsRunning] = useState(
@@ -35,15 +32,43 @@ export function FocusTimerProvider({ children }) {
   const [selectedGoalId, setSelectedGoalId] = useState(stored?.selectedGoalId ?? null);
   const [selectedGoalTaskId, setSelectedGoalTaskId] = useState(stored?.selectedGoalTaskId ?? null);
   const [sessionKind, setSessionKind] = useState(stored?.sessionKind || 'focus');
+  const [phase, setPhase] = useState(stored?.phase || 'focus'); // ✅ lives here now
+  const [coffeeEmpty, setCoffeeEmpty] = useState(false);
   const [completedAt, setCompletedAt] = useState(null);
   const [saveError, setSaveError] = useState(null);
 
-  // session that hit 0:00 while the app was closed/reloaded
+  const lastFocusMin = useRef(stored?.lastFocusMin || stored?.durationMin || 25);
+  const breakBackTimer = useRef(null);
   const missedCompletion = useRef(
     !!(stored?.isRunning && stored?.endAt && stored.endAt <= Date.now())
   );
 
-  // ---------- record session ----------
+  // ---------- phase switching ----------
+  const goBreak = () => {
+    setPhase('break');
+    setSessionKind('break');
+    setIsRunning(false);
+    setEndAt(null);
+    setDurationMin(5);
+    setTimeLeft(5 * 60);
+  };
+
+  const goFocus = () => {
+    setCoffeeEmpty(false);
+    setPhase('focus');
+    setSessionKind('focus');
+    setIsRunning(false);
+    setEndAt(null);
+    setDurationMin(lastFocusMin.current);
+    setTimeLeft(lastFocusMin.current * 60);
+  };
+
+  const skipBreak = () => {
+    if (breakBackTimer.current) clearTimeout(breakBackTimer.current);
+    goFocus();
+  };
+
+  // ---------- record + cycle ----------
   const recordSession = async (minutes) => {
     if (user && sessionKind === 'focus') {
       const { error } = await supabase.from('pomodoro_sessions').insert([{
@@ -62,12 +87,19 @@ export function FocusTimerProvider({ children }) {
       }
     }
     setCompletedAt(new Date().toISOString());
-    setTimeLeft(durationMin * 60);
+
+    // ✅ focus → coffee break · break → empty coffee → candle
+    if (sessionKind === 'focus') {
+      goBreak();
+    } else {
+      setCoffeeEmpty(true);
+      breakBackTimer.current = setTimeout(goFocus, 2600);
+    }
   };
   const recordRef = useRef(recordSession);
   recordRef.current = recordSession;
 
-  // ---------- wall-clock tick (survives navigation AND reloads) ----------
+  // ---------- wall-clock tick ----------
   useEffect(() => {
     if (!isRunning || !endAt) return;
     const tick = () => {
@@ -84,36 +116,37 @@ export function FocusTimerProvider({ children }) {
     return () => clearInterval(id);
   }, [isRunning, endAt, durationMin]);
 
-  // ---------- bank a session that finished while the app was closed ----------
+  // session that finished while the app was closed
   useEffect(() => {
     if (user && missedCompletion.current) {
       missedCompletion.current = false;
-      setIsRunning(false);
-      setEndAt(null);
       recordRef.current(stored?.durationMin || durationMin);
     }
   }, [user]);
 
-  // ---------- persist everything ----------
+  useEffect(() => () => { if (breakBackTimer.current) clearTimeout(breakBackTimer.current); }, []);
+
+  // ---------- persist ----------
   useEffect(() => {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({
-        durationMin, timeLeft, isRunning, endAt, sessionKind,
+        durationMin, timeLeft, isRunning, endAt, sessionKind, phase,
+        lastFocusMin: lastFocusMin.current,
         selectedTaskId, selectedGoalId, selectedGoalTaskId,
       }));
     } catch {}
-  }, [durationMin, timeLeft, isRunning, endAt, sessionKind, selectedTaskId, selectedGoalId, selectedGoalTaskId]);
+  }, [durationMin, timeLeft, isRunning, endAt, sessionKind, phase, selectedTaskId, selectedGoalId, selectedGoalTaskId]);
 
-  // ---------- tab title countdown ----------
+  // ---------- tab title ----------
   useEffect(() => {
     if (isRunning) {
       const m = Math.floor(timeLeft / 60).toString().padStart(2, '0');
       const s = (timeLeft % 60).toString().padStart(2, '0');
-      document.title = `${m}:${s} • Focusing — Rory Gilmore's World`;
+      document.title = `${m}:${s} • ${phase === 'focus' ? 'Focusing' : 'Break'} — Rory Gilmore's World`;
     } else {
       document.title = "Rory Gilmore's World";
     }
-  }, [timeLeft, isRunning]);
+  }, [timeLeft, isRunning, phase]);
 
   // ---------- controls ----------
   const start = () => {
@@ -124,6 +157,7 @@ export function FocusTimerProvider({ children }) {
   const pause = () => { setIsRunning(false); setEndAt(null); };
   const reset = () => { setIsRunning(false); setEndAt(null); setTimeLeft(durationMin * 60); };
   const changeDuration = (min) => {
+    if (sessionKind === 'focus') lastFocusMin.current = min; // remember focus length
     setDurationMin(min);
     setIsRunning(false);
     setEndAt(null);
@@ -139,11 +173,11 @@ export function FocusTimerProvider({ children }) {
 
   return (
     <FocusTimerContext.Provider value={{
-      durationMin, timeLeft, isRunning,
+      durationMin, timeLeft, isRunning, phase, coffeeEmpty,
       selectedTaskId, selectedGoalId, selectedGoalTaskId,
       completedAt, saveError, sessionKind,
       setSelectedTaskId, setSelectedGoalId, setSelectedGoalTaskId, setSessionKind,
-      start, pause, reset, changeDuration, done,
+      start, pause, reset, changeDuration, done, skipBreak,
     }}>
       {children}
     </FocusTimerContext.Provider>
