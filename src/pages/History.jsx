@@ -5,11 +5,8 @@ import {
   User, Flame, Trophy, BookOpen, ListChecks, Clock, PenLine,
   StickyNote, Target, TrendingUp, CalendarDays, Award, Timer, CheckCircle
 } from 'lucide-react';
+import { useScholarStats } from '../hooks/useScholarStats';
 
-// Display-only rounding — storage keeps exact fractional minutes (see
-// FocusTimerContext.done()); this just decides how to show them
-// (seconds for tiny durations, whole minutes/hours otherwise) instead
-// of a raw decimal like "14.233333333333325m".
 function formatMinutes(totalMin) {
   const totalSeconds = Math.round(totalMin * 60);
   const h = Math.floor(totalSeconds / 3600);
@@ -39,6 +36,9 @@ export default function History() {
   const [notesCount, setNotesCount] = useState(0);
   const [goals, setGoals] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // ✅ Live XP / level / streaks — computed from real sessions
+  const { xp, level, currentStreak, bestStreak } = useScholarStats();
 
   useEffect(() => {
     if (!user) return;
@@ -88,7 +88,6 @@ export default function History() {
   );
   const totalWords = writings.reduce((s, w) => s + (w.word_count || 0), 0);
 
-  // 📅 Weeks of the CURRENT month (W1: 1-7, W2: 8-14, ...)
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth();
@@ -109,7 +108,6 @@ export default function History() {
   });
   const maxWeekMinutes = Math.max(0, ...weekBuckets.map((w) => w.minutes));
 
-  // 🏆 Most productive weekday (all time)
   const weekdayTotals = [0, 0, 0, 0, 0, 0, 0];
   sessions.forEach((s) => { weekdayTotals[new Date(s.created_at).getDay()] += s.duration || 0; });
   const bestDayTotal = Math.max(...weekdayTotals);
@@ -162,23 +160,24 @@ export default function History() {
           </p>
         </div>
         <div className="flex items-center gap-6">
-          {profile?.level != null && (
-            <div className="text-center">
-              <p className="font-display text-2xl text-gilmore-gold">Lv {profile.level}</p>
-              <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream">{profile.xp ?? 0} XP</p>
-            </div>
-          )}
+          {/* ✅ Level + XP — live from sessions */}
+          <div className="text-center">
+            <p className="font-display text-2xl text-gilmore-gold">Lv {level}</p>
+            <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream">{xp} XP</p>
+          </div>
+          {/* ✅ Current streak — live */}
           <div className="text-center">
             <div className="flex items-center gap-1 justify-center">
               <Flame size={18} className="text-maple-rust" />
-              <span className="font-display text-2xl text-yale-blue">{profile?.current_streak ?? 0}</span>
+              <span className="font-display text-2xl text-yale-blue">{currentStreak}</span>
             </div>
             <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream">Current Streak</p>
           </div>
+          {/* ✅ Best streak — live */}
           <div className="text-center">
             <div className="flex items-center gap-1 justify-center">
               <Trophy size={18} className="text-gilmore-gold" />
-              <span className="font-display text-2xl text-yale-blue">{profile?.best_streak ?? 0}</span>
+              <span className="font-display text-2xl text-yale-blue">{bestStreak}</span>
             </div>
             <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream">Best Streak</p>
           </div>
@@ -198,7 +197,7 @@ export default function History() {
         ))}
       </div>
 
-      {/* 📊 Weekly study time — current month, auto-scaled bar chart */}
+      {/* 📊 Weekly study time */}
       <div className="cozy-card p-6 space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
