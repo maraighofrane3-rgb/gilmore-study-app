@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useFocusTimer } from '../context/FocusTimerContext';
@@ -158,7 +158,6 @@ function CandleAndCoffee({ phase, coffeeEmpty, progress, isRunning }) {
               </linearGradient>
             </defs>
 
-            {/* steam — only while the break runs and coffee is full */}
             {!coffeeEmpty && (
               <g stroke="#C89B7B" strokeWidth="4.5" strokeLinecap="round" fill="none" className={isRunning ? '' : 'opacity-0'}>
                 <path className="steam" d="M76 62c-6-9 6-13 0-24c-5-9 5-13 0-22" />
@@ -172,7 +171,6 @@ function CandleAndCoffee({ phase, coffeeEmpty, progress, isRunning }) {
             <path d="M146 84c17-2 24 8 22 17s-15 17-27 17" fill="none" stroke="#A0522D" strokeWidth="11" strokeLinecap="round" />
             <ellipse cx="98" cy="78" rx="48" ry="11" fill="#E8DCC3" />
 
-            {/* full coffee OR empty cup */}
             {coffeeEmpty ? (
               <>
                 <ellipse cx="98" cy="78" rx="40" ry="8" fill="#E3D7BD" />
@@ -225,7 +223,8 @@ export default function Focus() {
     selectedTaskId, setSelectedTaskId,
     selectedGoalId, setSelectedGoalId,
     selectedGoalTaskId, setSelectedGoalTaskId,
-    completedAt, done, setSessionKind,
+    completedAt, done,
+    phase, coffeeEmpty, skipBreak,
   } = useFocusTimer();
 
   const [tasks, setTasks] = useState([]);
@@ -237,14 +236,6 @@ export default function Focus() {
   const [weekDays, setWeekDays] = useState([]);
   const [dailyGoal, setDailyGoal] = useState(6);
 
-  // ✅ FOCUS / BREAK cycle
-  const [phase, setPhase] = useState('focus');       // 'focus' | 'break'
-  const [focusMin, setFocusMin] = useState(25);
-  const [breakMin, setBreakMin] = useState(5);
-  const [coffeeEmpty, setCoffeeEmpty] = useState(false);
-  const lastCompleted = useRef(null);
-  const breakBackTimer = useRef(null);
-
   const tasksOfSelectedGoal = useMemo(
     () => goalTasks.filter(t => t.goal_id === selectedGoalId && !t.completed),
     [goalTasks, selectedGoalId]
@@ -253,31 +244,6 @@ export default function Focus() {
   useEffect(() => {
     if (user) fetchStats();
   }, [user, completedAt]);
-
-  useEffect(() => () => { if (breakBackTimer.current) clearTimeout(breakBackTimer.current); }, []);
-
-  // ✅ When a timer completes → switch phase
-  useEffect(() => {
-    if (!completedAt || completedAt === lastCompleted.current) return;
-    lastCompleted.current = completedAt;
-
-    if (phase === 'focus') {
-      // focus done → break time, coffee appears
-      setPhase('break');
-      setSessionKind('break');
-      setBreakMin(5);
-      changeDuration(5);
-    } else {
-      // break done → coffee empties, then candle returns
-      setCoffeeEmpty(true);
-      breakBackTimer.current = setTimeout(() => {
-        setCoffeeEmpty(false);
-        setPhase('focus');
-        setSessionKind('focus');
-        changeDuration(focusMin);
-      }, 2600);
-    }
-  }, [completedAt, phase, focusMin, changeDuration, setSessionKind]);
 
   const fetchStats = async () => {
     const today = new Date().toISOString().split('T')[0];
@@ -342,7 +308,6 @@ export default function Focus() {
   };
 
   const goalMinutes = dailyGoal * 60;
-  // ✅ only focus time feeds the daily goal (not breaks)
   const liveSeconds = phase === 'focus' && timeLeft < durationMin * 60 ? durationMin * 60 - timeLeft : 0;
   const totalSeconds = todayMinutes * 60 + liveSeconds;
   const percent = Math.min(100, Math.round((totalSeconds / (goalMinutes * 60)) * 100));
@@ -509,10 +474,7 @@ export default function Focus() {
         {(phase === 'focus' ? DURATIONS : BREAKS).map(d => (
           <button
             key={d.min}
-            onClick={() => {
-              if (phase === 'focus') setFocusMin(d.min); else setBreakMin(d.min);
-              changeDuration(d.min);
-            }}
+            onClick={() => changeDuration(d.min)}
             className={`px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider border transition-all ${
               durationMin === d.min
                 ? 'bg-yale-blue text-page-cream border-yale-blue'
@@ -561,11 +523,7 @@ export default function Focus() {
 
         {phase === 'break' && !coffeeEmpty && (
           <button
-            onClick={() => {
-              setPhase('focus');
-              setSessionKind('focus');
-              changeDuration(focusMin);
-            }}
+            onClick={skipBreak}
             className="flex items-center gap-2 border border-coffee-cream/30 text-coffee-cream px-6 py-3.5 rounded-sm font-label text-sm uppercase tracking-wider hover:border-maple-rust hover:text-maple-rust transition-all"
           >
             Skip Break
