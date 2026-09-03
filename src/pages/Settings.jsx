@@ -16,6 +16,8 @@ const THEMES = [
   { id: 'midnight', label: 'Midnight', tagline: 'Reading under the blanket', swatch: ['#171B26', '#F5E6C8', '#E08659', '#D9B15C'] },
   { id: 'library', label: 'Library', tagline: 'Green lamp, worn leather chairs', swatch: ['#16211C', '#F0E4C4', '#C77B4D', '#C9A227'] },
   { id: 'cream', label: 'Cream', tagline: 'Sunlit morning at the counter', swatch: ['#FBF6EC', '#2F4F63', '#B85C3E', '#D4B15C'] },
+  // 🎓 NEW — Harvard joins the family (nothing removed)
+  { id: 'harvard', label: 'Harvard', tagline: 'Crimson ink on ivory pages', swatch: ['#F7F2E9', '#7D1128', '#A51C30', '#A9822E'] },
 ];
 
 export default function Settings() {
@@ -91,6 +93,12 @@ export default function Settings() {
       setPasswordData({ password: '', confirmPassword: '' });
     }
     setSaving(false);
+  };
+
+  // ✅ pick a theme: apply instantly AND remember it in the profile
+  const handlePickTheme = (id) => {
+    setTheme(id);
+    setProfile(prev => ({ ...prev, theme: id }));
   };
 
   if (loading) return <div className="text-center py-20 text-coffee-cream italic font-body">Loading settings...</div>;
@@ -210,7 +218,7 @@ export default function Settings() {
                 {THEMES.map(t => (
                   <button
                     key={t.id}
-                    onClick={() => setTheme(t.id)}
+                    onClick={() => handlePickTheme(t.id)}
                     className={`relative text-left p-4 rounded-sm border transition-all ${
                       theme === t.id
                         ? 'border-maple-rust shadow-cozy'

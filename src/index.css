@@ -7,7 +7,7 @@
 @layer base {
   /* ✅ Global font size boost (16px → 17px) */
   html {
-    font-size: 17px;
+    font-size: 19px;
   }
 
   /* ☀️ PAPER — Stars Hollow, autumn afternoon */
@@ -30,6 +30,23 @@
     --color-sidebar-accent: #D9B44A;   /* warm gold */
   }
 
+/* 🎓 HARVARD — crimson · oxblood · brass · ivy on warm ivory */
+[data-theme="harvard"] {
+  --color-page-cream:     #F7F2E9;   /* warm ivory, like Widener's reading rooms */
+  --color-parchment:      #EFE7D8;   /* aged card stock */
+  --color-library-ink:    #26201F;   /* warm near-black ink */
+  --color-yale-blue:      #7D1128;   /* deep oxblood crimson — headings */
+  --color-maple-rust:     #A51C30;   /* THE official Harvard crimson — actions */
+  --color-coffee-cream:   #7B6B60;   /* warm stone-gray muted text */
+  --color-gilmore-gold:   #A9822E;   /* antique brass (Veritas gold) */
+  --color-porch-sage:     #3E5F43;   /* Harvard Yard ivy green — success */
+
+  /* Sidebar: dark oxblood leather, like a dorm common room */
+  --color-sidebar-bg:     #2B0D13;
+  --color-sidebar-text:   #F4EBDD;
+  --color-sidebar-muted:  #C2A79B;   /* rosy parchment */
+  --color-sidebar-accent: #D9A441;   /* brass, pops on oxblood */
+}
   /* 🌙 MIDNIGHT — reading under the covers with a flashlight */
   [data-theme="midnight"] {
     --color-page-cream: #141824;        /* deeper night */
@@ -43,7 +60,7 @@
 
     /* Sidebar: deep moonlit indigo — cooler and more saturated than Paper's
        navy, distinct hue, still dark enough for strong text contrast. */
-    --color-sidebar-bg: #121A33;
+    --color-sidebar-bg: #18254c;
     --color-sidebar-text: #F0E8D6;
     --color-sidebar-muted: #9FB4D9;    /* soft periwinkle, moonlit feel */
     --color-sidebar-accent: #E8C26A;
@@ -62,7 +79,7 @@
 
     /* Sidebar: dark hunter-green leather armchair — earthy, distinct from
        Paper's blue and Midnight's indigo, still dark enough for contrast. */
-    --color-sidebar-bg: #17261C;
+    --color-sidebar-bg: #273e2f;
     --color-sidebar-text: #EFE6CB;
     --color-sidebar-muted: #A9C7A0;    /* sage, lighter than the bg's green */
     --color-sidebar-accent: #E0BE5C;   /* banker's-lamp brass */
@@ -81,7 +98,7 @@
 
     /* Sidebar: warm dark coffee-wood brown — the diner counter itself.
        Fourth distinct hue, dark enough to keep cream text crisp. */
-    --color-sidebar-bg: #3A2418;
+    --color-sidebar-bg: #502f1e;
     --color-sidebar-text: #FBF3E4;
     --color-sidebar-muted: #D9B98A;    /* warm caramel-tan */
     --color-sidebar-accent: #E8A23D;   /* amber, like the diner's neon sign */
@@ -338,4 +355,22 @@
   right: 34px; top: 2px; bottom: -5px;
   width: 6px;
   background: linear-gradient(#D9AC4F, #B4862E);
+}
+
+/* 🎓 HARVARD — crimson · oxblood · brass · ivy on warm ivory */
+:root[data-theme="harvard"] {
+  --color-page-cream:     #F7F2E9;   /* warm ivory, like Widener's reading rooms */
+  --color-parchment:      #EFE7D8;   /* aged card stock */
+  --color-library-ink:    #26201F;   /* warm near-black ink */
+  --color-yale-blue:      #7D1128;   /* deep oxblood crimson — headings */
+  --color-maple-rust:     #A51C30;   /* THE official Harvard crimson — actions */
+  --color-coffee-cream:   #7B6B60;   /* warm stone-gray muted text */
+  --color-gilmore-gold:   #A9822E;   /* antique brass (Veritas gold) */
+  --color-porch-sage:     #3E5F43;   /* Harvard Yard ivy green — success */
+
+  /* Sidebar: dark oxblood leather, like a dorm common room */
+  --color-sidebar-bg:     #540819;
+  --color-sidebar-text:   #F4EBDD;
+  --color-sidebar-muted:  #C2A79B;   /* rosy parchment */
+  --color-sidebar-accent: #D9A441;   /* brass, pops on oxblood */
 }

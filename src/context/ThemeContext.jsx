@@ -1,7 +1,17 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 
 const ThemeContext = createContext();
-const VALID_THEMES = ['paper', 'midnight', 'library', 'cream'];
+
+// 🎨 Every theme the app can wear — Harvard joins the family
+export const VALID_THEMES = ['paper', 'midnight', 'library', 'cream', 'harvard'];
+
+export const THEMES = [
+  { id: 'paper',    label: 'Paper',    emoji: '📜' },
+  { id: 'midnight', label: 'Midnight', emoji: '🌙' },
+  { id: 'library',  label: 'Library',  emoji: '📚' },
+  { id: 'cream',    label: 'Cream',    emoji: '☕' },
+  { id: 'harvard',  label: 'Harvard',  emoji: '🎓' },
+];
 
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(() => {
