@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import {
   ArrowLeft, FileText, Lightbulb, Quote, BookOpen, Trash2, Upload, Loader2,
-  Sparkles, X, Save, CheckCircle, Image as ImageIcon
+  Sparkles, X, Save, CheckCircle, Image as ImageIcon, Zap
 } from 'lucide-react';
 import { extractTextFromPDF, extractCoverFromPDF } from '../utils/pdfWorker';
 
@@ -22,9 +22,11 @@ export default function BookDetail({ book, onBack }) {
   const [activeAction, setActiveAction] = useState(null);
   const [result, setResult] = useState('');
   const [justSaved, setJustSaved] = useState(false);
-  const [usePdfText, setUsePdfText] = useState(false); // ✅ Mode PDF direct
-    const [fromPage, setFromPage] = useState('');
+  const [usePdfText, setUsePdfText] = useState(false);
+  const [fromPage, setFromPage] = useState('');
   const [toPage, setToPage] = useState('');
+  const [retryMessage, setRetryMessage] = useState('');
+  const [cacheHit, setCacheHit] = useState(false); // ✅ NEW: track if loaded from cache
 
   // 📖 Reading Progress states
   const [progressPage, setProgressPage] = useState('');
@@ -32,14 +34,14 @@ export default function BookDetail({ book, onBack }) {
   const [savingProgress, setSavingProgress] = useState(false);
 
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
-    // 💭 Personal Reflection states
+  
+  // 💭 Personal Reflection states
   const [personalReflection, setPersonalReflection] = useState(book.personal_reflection || '');
   const [editingReflection, setEditingReflection] = useState(false);
   const [savingReflection, setSavingReflection] = useState(false);
 
-    const [uploadingCover, setUploadingCover] = useState(false);
+  const [uploadingCover, setUploadingCover] = useState(false);
   const coverInputRef = useRef(null);
-
 
   useEffect(() => {
     if (currentBook) fetchNotes();
@@ -66,8 +68,7 @@ export default function BookDetail({ book, onBack }) {
     setLoading(false);
   };
 
-  // 📕 Upload the book's PDF (viewer + AI text)
-    // 📕 Upload the book's PDF (viewer + AI text + auto cover from page 1)
+  // 📕 Upload the book's PDF (viewer + AI text + auto cover from page 1)
   const handleBookPDFUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || file.type !== 'application/pdf') return;
@@ -132,8 +133,7 @@ export default function BookDetail({ book, onBack }) {
     e.target.value = '';
   };
 
-
-    // 🖼️ Upload / change the book cover
+  // 🖼️ Upload / change the book cover
   const handleCoverUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || !file.type.startsWith('image/')) return;
@@ -204,7 +204,7 @@ export default function BookDetail({ book, onBack }) {
     showNotification('Book completed! 🎉');
   };
 
-    // 💭 Save personal reflection
+  // 💭 Save personal reflection
   const savePersonalReflection = async () => {
     setSavingReflection(true);
     const { error } = await supabase
@@ -222,13 +222,12 @@ export default function BookDetail({ book, onBack }) {
     showNotification('Reflection saved!');
   };
 
-    // 📄 Extract only the text between page X and page Y (uses the "--- Page N ---" markers)
+  // 📄 Extract only the text between page X and page Y
   const getPageRangeText = (from, to) => {
     const content = currentBook.ai_text_content || '';
     if (!content) return '';
 
     const parts = content.split(/---\s*Page\s+(\d+)\s*---/);
-    // No markers found → fallback to the whole text
     if (parts.length < 3) return content;
 
     const pages = {};
@@ -243,8 +242,69 @@ export default function BookDetail({ book, onBack }) {
     return result.trim();
   };
 
-  // 🤖 Analyze excerpt or full PDF text
-     const handleAnalyze = async (action) => {
+  // ✅ Generate a cache key for the AI request
+  const generateCacheKey = (action, from, to, text) => {
+    const source = usePdfText ? `pages-${from}-${to}` : text.substring(0, 100);
+    return `${currentBook.id}_${action}_${source}`;
+  };
+
+  // ✅ Check cache before calling AI
+  const checkCache = (action, from, to, text) => {
+    const cacheKey = generateCacheKey(action, from, to, text);
+    const fieldName = action === 'summarize' ? 'ai_summary' : action === 'explain' ? 'ai_explanation' : 'ai_quotes';
+    
+    // Look for a note with matching original_text (our cache key)
+    const cached = notes.find(note => 
+      note.original_text === cacheKey && note[fieldName]
+    );
+    
+    return cached ? cached[fieldName] : null;
+  };
+
+  // ✅ Auto-save AI response to cache
+  const saveToCache = async (action, from, to, text, aiResult) => {
+    const cacheKey = generateCacheKey(action, from, to, text);
+    const noteData = {
+      user_id: user.id,
+      book_id: currentBook.id,
+      original_text: cacheKey, // Store cache key instead of user text
+    };
+    
+    if (action === 'summarize') noteData.ai_summary = aiResult;
+    else if (action === 'explain') noteData.ai_explanation = aiResult;
+    else if (action === 'quotes') noteData.ai_quotes = aiResult;
+
+    const { error } = await supabase.from('book_notes').insert([noteData]);
+    if (!error) {
+      await fetchNotes(); // Refresh notes to include the new cache entry
+    }
+  };
+
+  // ✅ Retry wrapper for Supabase Edge Functions
+  const invokeWithRetry = async (functionName, body, maxRetries = 3) => {
+    let delay = 2500;
+    
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+      const { data, error } = await supabase.functions.invoke(functionName, { body });
+      
+      if (error && error.message && error.message.includes('429')) {
+        if (attempt <= maxRetries) {
+          setRetryMessage(`The librarian is catching her breath... retry ${attempt}/${maxRetries} in ${Math.round(delay / 1000)}s`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2;
+          continue;
+        }
+      }
+      
+      setRetryMessage('');
+      return { data, error };
+    }
+    
+    return { data: null, error: new Error('Max retries exceeded') };
+  };
+
+  // 🤖 Analyze excerpt or full PDF text (with caching)
+  const handleAnalyze = async (action) => {
     const f = Math.max(1, parseInt(fromPage, 10) || 1);
     const t = Math.max(f, parseInt(toPage, 10) || f);
     const scope = usePdfText ? `pages ${f} to ${t}` : 'this excerpt';
@@ -264,11 +324,23 @@ export default function BookDetail({ book, onBack }) {
     setActiveAction(action);
     setResult('');
     setJustSaved(false);
+    setRetryMessage('');
+    setCacheHit(false);
 
     try {
+      // ✅ CHECK CACHE FIRST
+      const cachedResult = checkCache(action, f, t, sourceText);
+      if (cachedResult) {
+        setResult(cachedResult);
+        setCacheHit(true);
+        setAnalyzing(false);
+        showNotification(`Loaded from cache! (Instant ⚡)`);
+        return;
+      }
+
+      // ✅ NOT IN CACHE — call AI
       let systemPrompt = '';
-      // ✅ Limite intelligente selon l'action
-      let charLimit = 12000; // Default pour summarize/explain
+      let charLimit = 12000;
       
       if (action === 'summarize') {
         systemPrompt = `Provide a concise, clear summary of ${scope} from "${currentBook.title}". Focus on the main ideas and key takeaways in 2-3 paragraphs.`;
@@ -277,30 +349,33 @@ export default function BookDetail({ book, onBack }) {
         systemPrompt = `Explain ${scope} from "${currentBook.title}" in simple, clear terms. Break down any complex concepts or jargon.`;
         charLimit = 12000;
       } else if (action === 'quotes') {
-        // ✅ Limite à 3-5 citations pour éviter les réponses trop longues
         systemPrompt = `Extract exactly 3 to 5 of the most beautiful, meaningful or powerful quotes from ${scope} of "${currentBook.title}". Return each quote on its own line, wrapped in quotation marks, followed by a brief one-line interpretation. Do NOT exceed 5 quotes.`;
-        charLimit = 8000; // Quotes n'ont pas besoin d'autant de contexte
+        charLimit = 8000;
       }
 
-      const { data, error } = await supabase.functions.invoke('summarize-text', {
-        body: { 
-          text: sourceText.substring(0, charLimit), 
-          action, 
-          custom_prompt: systemPrompt 
-        },
+      const { data, error } = await invokeWithRetry('summarize-text', {
+        text: sourceText.substring(0, charLimit),
+        action,
+        custom_prompt: systemPrompt
       });
 
       if (error) throw new Error(error.message || 'Failed to analyze');
+      
       setResult(data.result);
       showNotification(`Analysis of ${scope} complete!`);
+      
+      // ✅ AUTO-SAVE TO CACHE
+      await saveToCache(action, f, t, sourceText, data.result);
+      
     } catch (err) {
       console.error('Analysis error:', err);
       showNotification(`Failed to analyze: ${err.message}`, 'error');
     }
     setAnalyzing(false);
+    setRetryMessage('');
   };
 
-  // 💾 Save AI result as note
+  // 💾 Save AI result as note (manual save still works)
   const handleSaveNote = async () => {
     if (!result || !activeAction) return;
 
@@ -328,6 +403,7 @@ export default function BookDetail({ book, onBack }) {
       setResult('');
       setActiveAction(null);
       setInputText('');
+      setCacheHit(false);
     }, 1500);
   };
 
@@ -373,7 +449,7 @@ export default function BookDetail({ book, onBack }) {
         </div>
       )}
 
-            {/* Header */}
+      {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <button onClick={onBack} className="p-2 rounded-sm hover:bg-coffee-cream/10 transition-colors">
@@ -495,7 +571,7 @@ export default function BookDetail({ book, onBack }) {
         </form>
       </div>
 
-            {/* 💭 Personal Reflection */}
+      {/* 💭 Personal Reflection */}
       <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
         <div className="flex items-center justify-between gap-4">
           <h3 className="font-display text-lg text-yale-blue flex items-center gap-2">
@@ -597,7 +673,7 @@ export default function BookDetail({ book, onBack }) {
           )}
         </div>
 
-                {usePdfText && (
+        {usePdfText && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-label text-xs uppercase tracking-wider text-coffee-cream">Analyze pages:</span>
             <input
@@ -633,6 +709,14 @@ export default function BookDetail({ book, onBack }) {
           className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm h-32 resize-y disabled:opacity-50"
         />
 
+        {/* ✅ Retry message */}
+        {retryMessage && (
+          <div className="flex items-center gap-2 p-3 bg-gilmore-gold/10 border border-gilmore-gold/30 rounded-sm animate-fade-in-up">
+            <Loader2 size={16} className="animate-spin text-gilmore-gold" />
+            <span className="font-body text-sm text-gilmore-gold italic">{retryMessage}</span>
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2">
           <button onClick={() => handleAnalyze('summarize')} disabled={analyzing} className="flex items-center gap-2 bg-yale-blue text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
             {analyzing && activeAction === 'summarize' ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />} Summarize
@@ -648,7 +732,7 @@ export default function BookDetail({ book, onBack }) {
         {result && (
           <div className="space-y-3 animate-fade-in-up">
             <div className="bg-parchment p-5 rounded-sm border border-coffee-cream/20 relative">
-              <button onClick={() => { setResult(''); setActiveAction(null); }} className="absolute top-2 right-2 text-coffee-cream/50 hover:text-maple-rust transition-colors">
+              <button onClick={() => { setResult(''); setActiveAction(null); setCacheHit(false); }} className="absolute top-2 right-2 text-coffee-cream/50 hover:text-maple-rust transition-colors">
                 <X size={16} />
               </button>
               <p className="font-body text-sm text-library-ink whitespace-pre-wrap leading-relaxed pr-6">{result}</p>
@@ -741,7 +825,7 @@ export default function BookDetail({ book, onBack }) {
                   </div>
                 </div>
 
-                {note.original_text && (
+                {note.original_text && !note.original_text.startsWith(currentBook.id + '_') && (
                   <div className="mb-4 p-3 bg-page-cream/50 border-l-2 border-coffee-cream/30 rounded-sm">
                     <p className="font-body text-xs text-coffee-cream italic line-clamp-3">
                       "{note.original_text}"

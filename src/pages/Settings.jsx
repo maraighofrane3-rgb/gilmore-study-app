@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { User, Lock, Palette, Clock, Save, CheckCircle } from 'lucide-react';
 
+
 const TABS = [
   { id: 'account', label: 'Account', icon: User },
   { id: 'privacy', label: 'Privacy', icon: Lock },
@@ -209,11 +210,17 @@ export default function Settings() {
             </div>
           )}
 
-          {activeTab === 'appearance' && (
+                    {activeTab === 'appearance' && (
             <div className="space-y-6">
               <h2 className="font-display text-2xl text-yale-blue mb-1">Appearance</h2>
-              <p className="font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-3">Select a mood</p>
 
+            
+
+              <p className="font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-3">
+                Select a theme
+              </p>
+
+              {/* 🎨 The 5 theme cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {THEMES.map(t => (
                   <button
@@ -245,7 +252,6 @@ export default function Settings() {
               </button>
             </div>
           )}
-
           {activeTab === 'productivity' && (
             <form onSubmit={handleSaveProfile} className="space-y-6">
               <h2 className="font-display text-2xl text-yale-blue mb-4">Productivity Defaults</h2>

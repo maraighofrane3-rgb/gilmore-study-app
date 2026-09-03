@@ -2,14 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useParams, useNavigate } from 'react-router-dom';
-import { extractTextFromPDF } from '../utils/pdfWorker';
 import { 
   BookOpen, Plus, Trash2, ArrowLeft, Loader2, 
   Sparkles, FileText, Lightbulb, List, X, ChevronRight,
   Save, CheckCircle, ChevronDown, Upload, FileText as FileIcon,
   MessageCircle, Send
 } from 'lucide-react';
-import { renderPDFAsImages } from '../utils/pdfWorker';
 
 export default function StudyMaterials() {
   const { materialId } = useParams();
@@ -93,68 +91,67 @@ export default function StudyMaterials() {
     }
   };
 
+  const handlePDFSubmit = async (e) => {
+    e.preventDefault();
+    if (!pdfFile) return;
 
-// ... inside the component ...
+    setUploadingPDF(true);
+    try {
+      // ⚡ DYNAMIC IMPORT — pdfWorker loads ONLY when user clicks Import PDF
+      const { extractTextFromPDF } = await import('../utils/pdfWorker');
 
-// In StudyMaterials.jsx, update handlePDFSubmit:
- const handlePDFSubmit = async (e) => {
-  e.preventDefault();
-  if (!pdfFile) return;
+      // 1. Extract text for AI analysis
+      const extractedText = await extractTextFromPDF(pdfFile);
+      
+      // 2. Upload PDF to Supabase Storage for viewing
+      const fileExt = pdfFile.name.split('.').pop();
+      const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+      
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('pdf-documents')
+        .upload(fileName, pdfFile, {
+          cacheControl: '3600',
+          upsert: false
+        });
 
-  setUploadingPDF(true);
-  try {
-    // 1. Extract text for AI analysis
-    const extractedText = await extractTextFromPDF(pdfFile);
-    
-    // 2. Upload PDF to Supabase Storage for viewing
-    const fileExt = pdfFile.name.split('.').pop();
-    const fileName = `${user.id}/${Date.now()}.${fileExt}`;
-    
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('pdf-documents')
-      .upload(fileName, pdfFile, {
-        cacheControl: '3600',
-        upsert: false
-      });
+      if (uploadError) throw uploadError;
 
-    if (uploadError) throw uploadError;
+      // 3. Get the public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('pdf-documents')
+        .getPublicUrl(fileName);
 
-    // 3. Get the public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from('pdf-documents')
-      .getPublicUrl(fileName);
+      // 4. Save BOTH the PDF viewer AND the extracted text
+      const { data, error } = await supabase
+        .from('chapters')
+        .insert([{ 
+          user_id: user.id, 
+          material_id: selectedMaterial.id, 
+          title: pdfTitle.trim() || 'Untitled Chapter',
+          content: extractedText,
+          pdf_url: publicUrl,
+          file_path: fileName,
+          is_from_pdf: true,
+          has_images: true
+        }])
+        .select()
+        .single();
 
-    // 4. Save BOTH the PDF viewer AND the extracted text
-    const { data, error } = await supabase
-      .from('chapters')
-      .insert([{ 
-        user_id: user.id, 
-        material_id: selectedMaterial.id, 
-        title: pdfTitle.trim() || 'Untitled Chapter',
-        content: extractedText, // ✅ Text for AI analysis
-        pdf_url: publicUrl,     // ✅ PDF for viewing
-        file_path: fileName,
-        is_from_pdf: true,
-        has_images: true
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
-    
-    setChapters([data, ...chapters]);
-    setShowPDFUpload(false);
-    setPdfFile(null);
-    setPdfTitle('');
-    
-    showNotification(`PDF uploaded successfully! Text extracted for AI analysis.`);
-    navigate(`/study-materials/${selectedMaterial.id}/chapter/${data.id}`);
-  } catch (err) {
-    console.error('PDF upload error:', err);
-    showNotification(`Failed to upload PDF: ${err.message}`, 'error');
-  }
-  setUploadingPDF(false);
-};
+      if (error) throw error;
+      
+      setChapters([data, ...chapters]);
+      setShowPDFUpload(false);
+      setPdfFile(null);
+      setPdfTitle('');
+      
+      showNotification(`PDF uploaded successfully! Text extracted for AI analysis.`);
+      navigate(`/study-materials/${selectedMaterial.id}/chapter/${data.id}`);
+    } catch (err) {
+      console.error('PDF upload error:', err);
+      showNotification(`Failed to upload PDF: ${err.message}`, 'error');
+    }
+    setUploadingPDF(false);
+  };
 
   const handleAddMaterial = async (e) => {
     e.preventDefault();
@@ -192,7 +189,6 @@ export default function StudyMaterials() {
       setNewChapter({ title: '', content: '' });
       setShowChapterForm(false);
       showNotification('Chapter added successfully!');
-      // Fixed URL: 'chapter' instead of 'chapters'
       navigate(`/study-materials/${selectedMaterial.id}/chapter/${data.id}`);
     } else {
       showNotification('Failed to add chapter.', 'error');
@@ -345,7 +341,6 @@ export default function StudyMaterials() {
                 <p className="text-center text-coffee-cream italic py-4 text-sm">No chapters yet.</p>
               ) : (
                 chapters.map((chapter) => (
-                  // ✅ FIXED: Changed 'chapters' to 'chapter' in the URL below
                   <div key={chapter.id} onClick={() => navigate(`/study-materials/${selectedMaterial.id}/chapter/${chapter.id}`)} className={`p-4 rounded-sm border cursor-pointer transition-all group ${selectedMaterial?.id === chapter.id ? 'bg-page-cream border-maple-rust shadow-cozy' : 'bg-parchment border-coffee-cream/20 hover:border-coffee-cream/50'}`}>
                     <div className="flex justify-between items-start">
                       <div>
@@ -363,7 +358,6 @@ export default function StudyMaterials() {
             </div>
           </div>
 
-          {/* Right column placeholder since detail view is now in ChapterDetail.jsx */}
           <div className="lg:col-span-2">
             <div className="text-center text-coffee-cream italic py-20 bg-parchment/50 rounded-sm border border-coffee-cream/20 h-full flex flex-col items-center justify-center">
               <BookOpen size={48} className="mx-auto mb-4 opacity-30" />

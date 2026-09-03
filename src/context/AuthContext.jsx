@@ -9,21 +9,34 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    // Check active sessions and sets the user
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+useEffect(() => {
+  const init = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
 
-    // Listen for changes on auth state (login, sign out, etc.)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    if (session) {
+      // ✅ Server-side validation of the stored token
+      const { error } = await supabase.auth.getUser();
+      if (error) {
+        // Token corrupted/expired/revoked → clean logout
+        await supabase.auth.signOut();
+        setUser(null);
+      } else {
+        setUser(session.user);
+      }
+    } else {
+      setUser(null);
+    }
+    setLoading(false);
+  };
+  init();
 
-    return () => subscription.unsubscribe();
-  }, []);
+  const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT') setUser(null);
+    else if (session) setUser(session.user);
+  });
+
+  return () => listener.subscription.unsubscribe();
+}, []);
 
   const signUp = async (email, password, username) => {
     const { data, error } = await supabase.auth.signUp({

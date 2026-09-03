@@ -6,7 +6,7 @@ import { extractTextFromPDF, renderPDFAsImages } from '../utils/pdfWorker';
 import {
   ArrowLeft, Loader2, Sparkles, FileText, Lightbulb, List, X,
   Save, CheckCircle, ChevronDown, Upload, FileText as FileIcon,
-  MessageCircle, Send, Trash2, Pencil, Plus, StickyNote, HelpCircle
+  MessageCircle, Send, Trash2, Pencil, Plus, StickyNote, HelpCircle, Zap
 } from 'lucide-react';
 
 export default function ChapterDetail() {
@@ -32,6 +32,8 @@ export default function ChapterDetail() {
   const [chapterResult, setChapterResult] = useState('');
   const [justSaved, setJustSaved] = useState(false);
   const [noteTitle, setNoteTitle] = useState('');
+  const [retryMessage, setRetryMessage] = useState('');
+  const [cacheHit, setCacheHit] = useState(false);
 
   const [savedNotes, setSavedNotes] = useState([]);
   const [expandedNote, setExpandedNote] = useState(null);
@@ -47,6 +49,7 @@ export default function ChapterDetail() {
   const [chatFromPage, setChatFromPage] = useState('');
   const [chatToPage, setChatToPage] = useState('');
   const [isAsking, setIsAsking] = useState(false);
+  const [chatRetryMessage, setChatRetryMessage] = useState('');
   const chatEndRef = useRef(null);
 
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
@@ -63,7 +66,6 @@ export default function ChapterDetail() {
     return c.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   };
 
-  // Try several marker formats, return the first split that works (or null)
   const splitByPages = (content) => {
     const patterns = [
       /[-_=*•–—]{2,}\s*page\s+(\d+)\s*[-_=*•–—]{2,}/i,
@@ -78,7 +80,6 @@ export default function ChapterDetail() {
     return null;
   };
 
-  // Returns: text of the range | '' (range empty) | null (no markers)
   const getPageRangeText = (from, to) => {
     const content = getReadableText();
     if (!content) return '';
@@ -250,6 +251,72 @@ export default function ChapterDetail() {
     showNotification('Chapter updated!');
   };
 
+  // ✅ Generate cache key for AI requests
+  const generateCacheKey = (action, from, to) => {
+    const hasRangeLocal = fromPage !== '' || toPage !== '';
+    const source = hasRangeLocal ? `pages-${from}-${to}` : 'full-chapter';
+    return `${chapter.id}_${action}_${source}`;
+  };
+
+  // ✅ Check cache before calling AI
+  const checkCache = (action, from, to) => {
+    const cacheKey = generateCacheKey(action, from, to);
+    const fieldName = action === 'summarize' ? 'ai_summary' : 
+                      action === 'explain' ? 'ai_explanation' : 
+                      action === 'keypoints' ? 'ai_key_points' : 'ai_summary';
+    
+    const cached = savedNotes.find(note => 
+      note.original_text === cacheKey && note[fieldName]
+    );
+    
+    return cached ? cached[fieldName] : null;
+  };
+
+  // ✅ Auto-save AI response to cache
+  const saveToCache = async (action, from, to, aiResult) => {
+    const cacheKey = generateCacheKey(action, from, to);
+    const noteData = {
+      user_id: user.id,
+      chapter_id: chapter.id,
+      title: `Cache: ${action} ${from}-${to}`,
+      original_text: cacheKey,
+    };
+    
+    if (action === 'summarize') noteData.ai_summary = aiResult;
+    else if (action === 'explain') noteData.ai_explanation = aiResult;
+    else if (action === 'keypoints') noteData.ai_key_points = aiResult.split('\n').filter(line => line.trim());
+    else if (action === 'quiz') noteData.ai_summary = `📝 QUIZ (QCM)\n\n${aiResult}`;
+
+    const { error } = await supabase.from('chapter_notes').insert([noteData]);
+    if (!error) {
+      const { data } = await supabase.from('chapter_notes').select('*').eq('chapter_id', chapter.id).order('created_at', { ascending: false });
+      setSavedNotes(data || []);
+    }
+  };
+
+  // ✅ Retry wrapper for Supabase Edge Functions
+  const invokeWithRetry = async (functionName, body, maxRetries = 3, setRetryMsg) => {
+    let delay = 2500;
+    
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+      const { data, error } = await supabase.functions.invoke(functionName, { body });
+      
+      if (error && error.message && error.message.includes('429')) {
+        if (attempt <= maxRetries) {
+          if (setRetryMsg) setRetryMsg(`The librarian is catching her breath... retry ${attempt}/${maxRetries} in ${Math.round(delay / 1000)}s`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2;
+          continue;
+        }
+      }
+      
+      if (setRetryMsg) setRetryMsg('');
+      return { data, error };
+    }
+    
+    return { data: null, error: new Error('Max retries exceeded') };
+  };
+
   const handleAnalyze = async (action) => {
     const rawText = getReadableText();
 
@@ -295,8 +362,21 @@ export default function ChapterDetail() {
     setChapterResult('');
     setJustSaved(false);
     setNoteTitle('');
+    setRetryMessage('');
+    setCacheHit(false);
 
     try {
+      // ✅ CHECK CACHE FIRST
+      const cachedResult = checkCache(action, f, t);
+      if (cachedResult) {
+        setChapterResult(Array.isArray(cachedResult) ? cachedResult.join('\n') : cachedResult);
+        setCacheHit(true);
+        setAnalyzing(false);
+        showNotification(`Loaded from cache! (Instant ⚡)`);
+        return;
+      }
+
+      // ✅ NOT IN CACHE — call AI
       let systemPrompt = '';
       let charLimit = 5000;
 
@@ -322,13 +402,11 @@ D) option
         charLimit = 4000;
       }
 
-      const { data, error } = await supabase.functions.invoke('summarize-text', {
-        body: {
-          text: sourceText.substring(0, charLimit),
-          action,
-          custom_prompt: systemPrompt
-        },
-      });
+      const { data, error } = await invokeWithRetry('summarize-text', {
+        text: sourceText.substring(0, charLimit),
+        action,
+        custom_prompt: systemPrompt
+      }, 3, setRetryMessage);
 
       if (error) {
         let details = error.message || 'Failed to analyze';
@@ -349,11 +427,16 @@ D) option
 
       setChapterResult(data.result);
       showNotification(`Analysis of ${scope} complete!`);
+      
+      // ✅ AUTO-SAVE TO CACHE
+      await saveToCache(action, f, t, data.result);
+      
     } catch (err) {
       console.error('Analysis error:', err);
       showNotification(`Failed to analyze: ${err.message}`, 'error');
     }
     setAnalyzing(false);
+    setRetryMessage('');
   };
 
   const handleAskQuestion = async (e) => {
@@ -364,6 +447,7 @@ D) option
     setQuestionInput('');
     setChatMessages(prev => [...prev, { role: 'user', content: userQuestion }]);
     setIsAsking(true);
+    setChatRetryMessage('');
 
     try {
       const baseText = getReadableText();
@@ -411,12 +495,10 @@ D) option
         return;
       }
 
-      const { data, error } = await supabase.functions.invoke('ask-chapter', {
-        body: {
-          question: userQuestion + scopeNote,
-          context: context.substring(0, 8000),
-        },
-      });
+      const { data, error } = await invokeWithRetry('ask-chapter', {
+        question: userQuestion + scopeNote,
+        context: context.substring(0, 8000),
+      }, 3, setChatRetryMessage);
 
       if (error) {
         let details = error.message || "Sorry, I couldn't process that question.";
@@ -437,6 +519,7 @@ D) option
       setChatMessages(prev => [...prev, { role: 'assistant', content: `Sorry: ${err.message}` }]);
     }
     setIsAsking(false);
+    setChatRetryMessage('');
   };
 
   const handleSaveNote = async () => {
@@ -470,6 +553,7 @@ D) option
         setChapterResult('');
         setNoteTitle('');
         setActiveAction(null);
+        setCacheHit(false);
       }, 1500);
     } catch (err) {
       console.error('Save error:', err);
@@ -696,10 +780,18 @@ D) option
           </button>
         </div>
 
+        {/* ✅ Retry message */}
+        {retryMessage && (
+          <div className="flex items-center gap-2 p-3 bg-gilmore-gold/10 border border-gilmore-gold/30 rounded-sm animate-fade-in-up">
+            <Loader2 size={16} className="animate-spin text-gilmore-gold" />
+            <span className="font-body text-sm text-gilmore-gold italic">{retryMessage}</span>
+          </div>
+        )}
+
         {chapterResult && (
           <div className="space-y-4 animate-fade-in-up">
             <div className="bg-parchment p-5 rounded-sm border border-coffee-cream/20 relative">
-              <button onClick={() => { setChapterResult(''); setActiveAction(null); setNoteTitle(''); }} className="absolute top-2 right-2 text-coffee-cream/50 hover:text-maple-rust transition-colors"><X size={16} /></button>
+              <button onClick={() => { setChapterResult(''); setActiveAction(null); setNoteTitle(''); setCacheHit(false); }} className="absolute top-2 right-2 text-coffee-cream/50 hover:text-maple-rust transition-colors"><X size={16} /></button>
               <p className="font-body text-sm text-library-ink whitespace-pre-wrap leading-relaxed pr-6">{chapterResult}</p>
             </div>
             <div>
@@ -778,6 +870,15 @@ D) option
               </div>
             </div>
           )}
+          {/* ✅ Chat retry message */}
+          {chatRetryMessage && (
+            <div className="flex justify-start">
+              <div className="bg-gilmore-gold/10 border border-gilmore-gold/30 p-3 rounded-sm rounded-bl-none flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin text-gilmore-gold" />
+                <span className="text-sm text-gilmore-gold italic">{chatRetryMessage}</span>
+              </div>
+            </div>
+          )}
           <div ref={chatEndRef} />
         </div>
 
@@ -843,7 +944,7 @@ D) option
           </p>
         ) : (
           <div className="space-y-3">
-            {savedNotes.map((note, idx) => (
+            {savedNotes.filter(note => !note.original_text?.startsWith(chapter.id + '_')).map((note, idx) => (
               <div key={note.id} className="bg-page-cream border border-coffee-cream/20 rounded-sm overflow-hidden">
                 <div
                   onClick={() => setExpandedNote(expandedNote === note.id ? null : note.id)}
