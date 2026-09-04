@@ -4,9 +4,10 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useFocusTimer } from '../context/FocusTimerContext';
 import DailyCoach from '../components/DailyCoach';
+import WeeklyChronicleModal from '../components/WeeklyChronicleModal';
 import {
   Play, Plus, PenLine, Upload, CheckCircle, Circle,
-  CalendarDays, ChevronRight,
+  CalendarDays, ChevronRight, Mail,
 } from 'lucide-react';
 
 function getGreeting() {
@@ -55,7 +56,10 @@ export default function Dashboard() {
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [goalHours, setGoalHours] = useState(6);
   const [loading, setLoading] = useState(true);
-  const [greeting] = useState(getGreeting);
+  
+  // ✅ Fixed: Call the function instead of passing the reference
+  const greeting = getGreeting(); 
+  const [isChronicleOpen, setIsChronicleOpen] = useState(false);
 
   const today = new Date();
   const todayKey = keyOf(today);
@@ -105,6 +109,8 @@ export default function Dashboard() {
     Math.round((new Date(`${key}T00:00:00`) - new Date(`${todayKey}T00:00:00`)) / 86400000);
 
   const firstName = user?.user_metadata?.username || user?.email?.split('@')[0] || 'Scholar';
+
+  if (loading) return <div className="text-center py-20 text-coffee-cream italic font-body">Loading your study space...</div>;
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -197,6 +203,28 @@ export default function Dashboard() {
 
         {/* ── Right: now & next ── */}
         <div className="lg:col-span-2 space-y-6">
+          
+          {/* 📜 Weekly Chronicle Card */}
+          <div className="cozy-card p-6 flex flex-col justify-between group hover:border-maple-rust/50 transition-all">
+            <div className="flex items-start justify-between mb-4">
+              <div className="p-2 bg-maple-rust/10 rounded-sm text-maple-rust">
+                <Mail size={20} />
+              </div>
+            </div>
+            <div>
+              <h3 className="font-display text-lg text-library-ink mb-1">Weekly Chronicle</h3>
+              <p className="font-body text-sm text-coffee-cream mb-4">
+                Receive a personalized letter from the Dean reflecting on your week's scholarly pursuits.
+              </p>
+              <button 
+                onClick={() => setIsChronicleOpen(true)}
+                className="w-full bg-yale-blue/5 border border-yale-blue/20 text-yale-blue px-4 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue hover:text-page-cream transition-all"
+              >
+                Read the Letter
+              </button>
+            </div>
+          </div>
+
           {/* Today's plan */}
           <div className="cozy-card p-6 space-y-3">
             <div className="flex items-center justify-between">
@@ -245,6 +273,12 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* ✅ Weekly Chronicle Modal */}
+      <WeeklyChronicleModal 
+        isOpen={isChronicleOpen} 
+        onClose={() => setIsChronicleOpen(false)} 
+      />
     </div>
   );
 }

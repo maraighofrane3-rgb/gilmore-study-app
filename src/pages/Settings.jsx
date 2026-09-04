@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { User, Lock, Palette, Clock, Save, CheckCircle } from 'lucide-react';
-
+import { User, Lock, Palette, Clock, Save, CheckCircle, AlertTriangle, Trash2 } from 'lucide-react';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const TABS = [
   { id: 'account', label: 'Account', icon: User },
@@ -17,7 +17,6 @@ const THEMES = [
   { id: 'midnight', label: 'Midnight', tagline: 'Reading under the blanket', swatch: ['#171B26', '#F5E6C8', '#E08659', '#D9B15C'] },
   { id: 'library', label: 'Library', tagline: 'Green lamp, worn leather chairs', swatch: ['#16211C', '#F0E4C4', '#C77B4D', '#C9A227'] },
   { id: 'cream', label: 'Cream', tagline: 'Sunlit morning at the counter', swatch: ['#FBF6EC', '#2F4F63', '#B85C3E', '#D4B15C'] },
-  // 🎓 NEW — Harvard joins the family (nothing removed)
   { id: 'harvard', label: 'Harvard', tagline: 'Crimson ink on ivory pages', swatch: ['#F7F2E9', '#7D1128', '#A51C30', '#A9822E'] },
 ];
 
@@ -28,6 +27,10 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
+  
+  // ✅ États pour la suppression de compte
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [profile, setProfile] = useState({
     username: '', bio: '', theme: 'paper',
@@ -36,7 +39,7 @@ export default function Settings() {
   const [passwordData, setPasswordData] = useState({ password: '', confirmPassword: '' });
 
   useEffect(() => {
-    fetchProfile();
+    if (user) fetchProfile();
   }, [user]);
 
   const fetchProfile = async () => {
@@ -96,7 +99,23 @@ export default function Settings() {
     setSaving(false);
   };
 
-  // ✅ pick a theme: apply instantly AND remember it in the profile
+  // ✅ Suppression du compte via Edge Function
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    try {
+      const { error } = await supabase.functions.invoke('delete-account');
+      if (error) throw error;
+      
+      await supabase.auth.signOut();
+      window.location.href = '/'; // Redirection propre vers l'accueil
+    } catch (err) {
+      console.error('Error deleting account:', err);
+      setMessage({ type: 'error', text: 'Failed to delete account. Please try again.' });
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
   const handlePickTheme = (id) => {
     setTheme(id);
     setProfile(prev => ({ ...prev, theme: id }));
@@ -148,45 +167,92 @@ export default function Settings() {
         <div className="flex-1 bg-page-cream p-8 rounded-sm border border-coffee-cream/20 shadow-cozy">
 
           {activeTab === 'account' && (
-            <form onSubmit={handleSaveProfile} className="space-y-6">
-              <h2 className="font-display text-2xl text-yale-blue mb-4">Profile Information</h2>
-              <div>
-                <label className="block font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-1.5">Username</label>
-                <input
-                  type="text" value={profile.username}
-                  onChange={e => setProfile({...profile, username: e.target.value})}
-                  className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:ring-2 focus:ring-maple-rust/25 focus:border-maple-rust font-body transition-colors"
-                />
+            <div className="space-y-6">
+              <form onSubmit={handleSaveProfile} className="space-y-6">
+                <h2 className="font-display text-2xl text-yale-blue mb-4">Profile Information</h2>
+                <div>
+                  <label className="block font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-1.5">Username</label>
+                  <input
+                    type="text" value={profile.username}
+                    onChange={e => setProfile({...profile, username: e.target.value})}
+                    className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:ring-2 focus:ring-maple-rust/25 focus:border-maple-rust font-body transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-1.5">Bio</label>
+                  <textarea
+                    value={profile.bio}
+                    onChange={e => setProfile({...profile, bio: e.target.value})}
+                    className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:ring-2 focus:ring-maple-rust/25 focus:border-maple-rust font-body h-24 resize-none transition-colors"
+                    placeholder="Tell the world about your academic journey..."
+                  />
+                </div>
+                <div>
+                  <label className="block font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-1.5">Email</label>
+                  <input type="email" value={user?.email || ''} disabled className="w-full p-3 bg-parchment/50 border border-coffee-cream/10 rounded-sm font-body text-coffee-cream/50 cursor-not-allowed" />
+                </div>
+                <button type="submit" disabled={saving} className="flex items-center gap-2 bg-maple-rust text-page-cream px-6 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider-label hover:bg-yale-blue transition-colors disabled:opacity-50">
+                  <Save size={16} /> {saving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </form>
+
+              {/* 🚨 DANGER ZONE */}
+              <div className="mt-12 pt-8 border-t border-coffee-cream/20">
+                <h3 className="font-display text-xl text-maple-rust flex items-center gap-2 mb-2">
+                  <AlertTriangle size={20} /> Danger Zone
+                </h3>
+                <p className="font-body text-sm text-coffee-cream/80 mb-4">
+                  Once you delete your account, there is no going back. All your books, notes, goals, and focus sessions will be permanently erased from the library.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="flex items-center gap-2 bg-maple-rust/10 border border-maple-rust/30 text-maple-rust px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust hover:text-page-cream transition-all"
+                >
+                  <Trash2 size={14} />
+                  Delete my account permanently
+                </button>
               </div>
-              <div>
-                <label className="block font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-1.5">Bio</label>
-                <textarea
-                  value={profile.bio}
-                  onChange={e => setProfile({...profile, bio: e.target.value})}
-                  className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:ring-2 focus:ring-maple-rust/25 focus:border-maple-rust font-body h-24 resize-none transition-colors"
-                  placeholder="Tell the world about your academic journey..."
-                />
-              </div>
-              <div>
-                <label className="block font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-1.5">Email</label>
-                <input type="email" value={user.email} disabled className="w-full p-3 bg-parchment/50 border border-coffee-cream/10 rounded-sm font-body text-coffee-cream/50 cursor-not-allowed" />
-              </div>
-              <button type="submit" disabled={saving} className="flex items-center gap-2 bg-maple-rust text-page-cream px-6 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider-label hover:bg-yale-blue transition-colors disabled:opacity-50">
-                <Save size={16} /> {saving ? 'Saving...' : 'Save Changes'}
-              </button>
-            </form>
+            </div>
           )}
 
           {activeTab === 'privacy' && (
             <div className="space-y-6">
               <h2 className="font-display text-2xl text-yale-blue mb-4">Privacy & Security</h2>
+              
+              {/* ✅ Fully functional toggle with DB save */}
               <div className="flex items-center justify-between p-4 bg-parchment rounded-sm border border-coffee-cream/10">
                 <div>
-                  <h3 className="font-body text-library-ink">Email Notifications</h3>
-                  <p className="font-label text-[0.65rem] text-coffee-cream mt-1">Receive weekly summaries and goal reminders.</p>
+                  <h3 className="font-body text-library-ink font-medium">Email Notifications</h3>
+                  <p className="font-label text-[0.65rem] text-coffee-cream mt-1">
+                    Receive weekly summaries and goal reminders.
+                  </p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" checked={profile.email_notifications} onChange={e => setProfile({...profile, email_notifications: e.target.checked})} className="sr-only peer" />
+                  <input
+                    type="checkbox"
+                    checked={profile.email_notifications}
+                    onChange={async (e) => {
+                      const newValue = e.target.checked;
+                      // Optimistic update
+                      setProfile(prev => ({ ...prev, email_notifications: newValue }));
+                      
+                      // Save to database
+                      const { error } = await supabase
+                        .from('profiles')
+                        .update({ email_notifications: newValue })
+                        .eq('id', user.id);
+                      
+                      if (error) {
+                        // Rollback on error
+                        setProfile(prev => ({ ...prev, email_notifications: !newValue }));
+                        setMessage({ type: 'error', text: 'Failed to update preferences.' });
+                      } else {
+                        setMessage({ type: 'success', text: 'Preferences saved.' });
+                      }
+                    }}
+                    className="sr-only peer"
+                  />
                   <div className="w-11 h-6 bg-coffee-cream/20 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-page-cream after:border-coffee-cream/30 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-maple-rust"></div>
                 </label>
               </div>
@@ -210,17 +276,13 @@ export default function Settings() {
             </div>
           )}
 
-                    {activeTab === 'appearance' && (
+          {activeTab === 'appearance' && (
             <div className="space-y-6">
               <h2 className="font-display text-2xl text-yale-blue mb-1">Appearance</h2>
-
-            
-
               <p className="font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-3">
                 Select a theme
               </p>
 
-              {/* 🎨 The 5 theme cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {THEMES.map(t => (
                   <button
@@ -252,6 +314,7 @@ export default function Settings() {
               </button>
             </div>
           )}
+
           {activeTab === 'productivity' && (
             <form onSubmit={handleSaveProfile} className="space-y-6">
               <h2 className="font-display text-2xl text-yale-blue mb-4">Productivity Defaults</h2>
@@ -279,6 +342,21 @@ export default function Settings() {
 
         </div>
       </div>
+
+      {/* ✅ Modal de confirmation pour la suppression */}
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Are you absolutely sure?"
+        message={
+          <p className="font-body text-sm text-library-ink">
+            This action cannot be undone. This will permanently delete your account, along with all your <span className="italic font-semibold">books, notes, projects, and focus history</span>.
+          </p>
+        }
+        onConfirm={handleDeleteAccount}
+        onCancel={() => setShowDeleteConfirm(false)}
+        confirmText={isDeleting ? "Deleting..." : "Yes, delete everything"}
+        cancelText="Keep my account"
+      />
     </div>
   );
 }
