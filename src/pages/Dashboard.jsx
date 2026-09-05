@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useFocusTimer } from '../context/FocusTimerContext';
 import DailyCoach from '../components/DailyCoach';
 import WeeklyChronicleModal from '../components/WeeklyChronicleModal';
+import { requestNotificationPermission, sendNotification, MESSAGES } from '../lib/notifications';
 import {
   Play, Plus, PenLine, Upload, CheckCircle, Circle,
   CalendarDays, ChevronRight, Mail,
@@ -64,24 +65,71 @@ export default function Dashboard() {
   const today = new Date();
   const todayKey = keyOf(today);
 
-  useEffect(() => {
+    useEffect(() => {
     if (!user) return;
     let mounted = true;
+    
     const loadData = async () => {
-      const [tasksRes, sessionsRes, profileRes] = await Promise.all([
+      // ✅ Added books and goals to the Promise.all
+      const [tasksRes, sessionsRes, profileRes, booksRes, goalsRes] = await Promise.all([
         supabase.from('tasks').select('*').eq('user_id', user.id),
         supabase.from('pomodoro_sessions').select('duration').eq('user_id', user.id).eq('completed', true).gte('created_at', `${todayKey}T00:00:00`),
         supabase.from('profiles').select('daily_goal_hours').eq('id', user.id).maybeSingle(),
+        supabase.from('books').select('*').eq('user_id', user.id).eq('status', 'reading'),
+        supabase.from('goals').select('*').eq('user_id', user.id).neq('status', 'completed')
       ]);
+      
       if (!mounted) return;
+      
       setTasks(tasksRes.data || []);
       setTodayMinutes((sessionsRes.data || []).reduce((s, r) => s + (r.duration || 0), 0));
       setGoalHours(profileRes.data?.daily_goal_hours || 6);
+      
+      // ✅ Trigger the reminder checks
+      checkReminders(tasksRes.data || [], booksRes.data || [], goalsRes.data || []);
+      
       setLoading(false);
     };
+    
     loadData();
     return () => { mounted = false; };
   }, [user, todayKey, completedAt]);
+
+    const checkReminders = (tasks, books, goals) => {
+    if (Notification.permission !== "granted") {
+      requestNotificationPermission();
+      return;
+    }
+
+    const today = new Date();
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const twoDaysAgo = new Date();
+    twoDaysAgo.setDate(today.getDate() - 2);
+
+    // 1. No tasks for today?
+    const todayTasks = tasks.filter(t => t.due_date === todayKey);
+    if (todayTasks.length === 0) {
+      sendNotification(MESSAGES.noTasks.title, MESSAGES.noTasks.body);
+    }
+
+    // 2. Book not updated in 2 days?
+    const stalledBooks = books.filter(b => {
+      if (!b.updated_at) return true;
+      return new Date(b.updated_at) < twoDaysAgo;
+    });
+    if (stalledBooks.length > 0) {
+      sendNotification(MESSAGES.bookStall.title, MESSAGES.bookStall.body);
+    }
+
+    // 3. Goals not updated in 2 days?
+    const stalledGoals = goals.filter(g => {
+      if (!g.updated_at) return true;
+      return new Date(g.updated_at) < twoDaysAgo;
+    });
+    if (stalledGoals.length > 0) {
+      sendNotification(MESSAGES.goalStall.title, MESSAGES.goalStall.body);
+    }
+  };
 
   const toggleTask = async (task) => {
     const newStatus = task.status === 'done' ? 'todo' : 'done';

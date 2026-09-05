@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { User, Lock, Palette, Clock, Save, CheckCircle, AlertTriangle, Trash2 } from 'lucide-react';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { requestNotificationPermission, sendNotification, MESSAGES } from '../lib/notifications';
 
 const TABS = [
   { id: 'account', label: 'Account', icon: User },
@@ -32,9 +33,12 @@ export default function Settings() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // ✅ Fixed: Added missing comma and notifications_enabled
   const [profile, setProfile] = useState({
     username: '', bio: '', theme: 'paper',
-    default_pomodoro_duration: 25, default_daily_goal_hours: 2, email_notifications: true
+    default_pomodoro_duration: 25, default_daily_goal_hours: 2, 
+    email_notifications: true,
+    notifications_enabled: true
   });
   const [passwordData, setPasswordData] = useState({ password: '', confirmPassword: '' });
 
@@ -57,7 +61,8 @@ export default function Settings() {
         theme: data.theme || 'paper',
         default_pomodoro_duration: data.default_pomodoro_duration || 25,
         default_daily_goal_hours: data.default_daily_goal_hours || 2,
-        email_notifications: data.email_notifications !== false
+        email_notifications: data.email_notifications !== false,
+        notifications_enabled: data.notifications_enabled !== false // ✅ Added
       });
     }
     setLoading(false);
@@ -220,7 +225,7 @@ export default function Settings() {
             <div className="space-y-6">
               <h2 className="font-display text-2xl text-yale-blue mb-4">Privacy & Security</h2>
               
-              {/* ✅ Fully functional toggle with DB save */}
+              {/* ✅ Email Notifications Toggle */}
               <div className="flex items-center justify-between p-4 bg-parchment rounded-sm border border-coffee-cream/10">
                 <div>
                   <h3 className="font-body text-library-ink font-medium">Email Notifications</h3>
@@ -234,18 +239,46 @@ export default function Settings() {
                     checked={profile.email_notifications}
                     onChange={async (e) => {
                       const newValue = e.target.checked;
-                      // Optimistic update
                       setProfile(prev => ({ ...prev, email_notifications: newValue }));
-                      
-                      // Save to database
-                      const { error } = await supabase
-                        .from('profiles')
-                        .update({ email_notifications: newValue })
-                        .eq('id', user.id);
-                      
+                      const { error } = await supabase.from('profiles').update({ email_notifications: newValue }).eq('id', user.id);
                       if (error) {
-                        // Rollback on error
                         setProfile(prev => ({ ...prev, email_notifications: !newValue }));
+                        setMessage({ type: 'error', text: 'Failed to update preferences.' });
+                      } else {
+                        setMessage({ type: 'success', text: 'Preferences saved.' });
+                      }
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-coffee-cream/20 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-page-cream after:border-coffee-cream/30 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-maple-rust"></div>
+                </label>
+              </div>
+
+              {/* ✅ OS Study Reminders Toggle */}
+              <div className="flex items-center justify-between p-4 bg-parchment rounded-sm border border-coffee-cream/10">
+                <div>
+                  <h3 className="font-body text-library-ink font-medium">Study Reminders</h3>
+                  <p className="font-label text-[0.65rem] text-coffee-cream mt-1">
+                    Get OS alerts for tasks, books, and goals.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={profile.notifications_enabled}
+                    onChange={async (e) => {
+                      const newValue = e.target.checked;
+                      if (newValue) {
+                        const granted = await requestNotificationPermission();
+                        if (!granted) {
+                          setMessage({ type: 'error', text: 'Notification permission denied by browser.' });
+                          return;
+                        }
+                      }
+                      setProfile(prev => ({ ...prev, notifications_enabled: newValue }));
+                      const { error } = await supabase.from('profiles').update({ notifications_enabled: newValue }).eq('id', user.id);
+                      if (error) {
+                        setProfile(prev => ({ ...prev, notifications_enabled: !newValue }));
                         setMessage({ type: 'error', text: 'Failed to update preferences.' });
                       } else {
                         setMessage({ type: 'success', text: 'Preferences saved.' });
