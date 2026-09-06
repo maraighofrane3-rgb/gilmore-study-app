@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import {
   Plus, BookOpen, Trash2, AlertCircle, Search, FileText,
-  CheckCircle, Clock, X, BookMarked, TrendingUp, Image as ImageIcon
+  CheckCircle, Clock, X, BookMarked, TrendingUp, Image as ImageIcon, Pencil
 } from 'lucide-react';
 import BookDetail from '../components/BookDetail';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -29,8 +29,8 @@ const EMPTY_NEW_BOOK = {
   cover_color: '#132A44'
 };
 
-// ✅ Memoized BookCard that displays covers when available
-const BookCard = memo(function BookCard({ book, index, onSelect, onStatusChange, onDelete }) {
+// ✅ Memoized BookCard with Edit functionality
+const BookCard = memo(function BookCard({ book, index, onSelect, onStatusChange, onDelete, onEdit }) {
   const progress = book.total_pages && book.current_page
     ? Math.round((book.current_page / book.total_pages) * 100)
     : null;
@@ -41,7 +41,6 @@ const BookCard = memo(function BookCard({ book, index, onSelect, onStatusChange,
       style={{ animationDelay: `${Math.min(index, 20) * 0.05}s` }}
       onClick={() => onSelect(book)}
     >
-      {/* ✅ Show real cover if available, else just the colored bar */}
       {book.cover_url ? (
         <div className="mb-4 -mx-5 -mt-5 rounded-t-sm overflow-hidden border-b border-coffee-cream/20 aspect-[2/3] bg-page-cream">
           <img
@@ -105,26 +104,37 @@ const BookCard = memo(function BookCard({ book, index, onSelect, onStatusChange,
         >
           {TABS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
         </select>
-        <button
-          onClick={() => onDelete(book)}
-          aria-label={`Remove ${book.title} from library`}
-          className="text-coffee-cream/40 hover:text-maple-rust transition-colors"
-        >
-          <Trash2 size={16} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onEdit(book)}
+            aria-label={`Edit ${book.title}`}
+            className="text-coffee-cream/40 hover:text-yale-blue transition-colors p-1"
+          >
+            <Pencil size={16} />
+          </button>
+          <button
+            onClick={() => onDelete(book)}
+            aria-label={`Remove ${book.title} from library`}
+            className="text-coffee-cream/40 hover:text-maple-rust transition-colors p-1"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
       </div>
     </div>
   );
 });
 
-// 📖 Aesthetic open book with a turning page
 function FlippingBook() {
   return (
-    <div className="fb-scene mb-1" aria-hidden="true">
+    <div className="fb-scene" aria-hidden="true">
       <div className="fb-book">
         <div className="fb-cover" />
-        <div className="fb-page fb-left" />
+        <div className="fb-page fb-left">
+          <span className="fb-fleuron">❦</span>
+        </div>
         <div className="fb-page fb-right" />
+        <div className="fb-ribbon fb-ribbon-gold" />
         <div className="fb-ribbon" />
         <div className="fb-spine" />
         <div className="fb-page fb-flip" />
@@ -147,12 +157,14 @@ export default function Library() {
 
   const [newBook, setNewBook] = useState(EMPTY_NEW_BOOK);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  
+  // ✅ Edit Book States
+  const [editingBook, setEditingBook] = useState(null);
+  const [editForm, setEditForm] = useState({ title: '', author: '', genre: '', total_pages: '' });
 
-  // ✅ Cover states — INSIDE the component (was the main bug)
   const [coverFile, setCoverFile] = useState(null);
   const [coverPreview, setCoverPreview] = useState('');
 
-  // ✅ Cover handler — INSIDE the component
   const handleCoverChange = (e) => {
     const file = e.target.files[0];
     if (!file || !file.type.startsWith('image/')) return;
@@ -202,7 +214,6 @@ export default function Library() {
     let currentPage = newBook.current_page ? parseInt(newBook.current_page, 10) : 0;
     if (totalPages && currentPage > totalPages) currentPage = totalPages;
 
-    // 🖼️ Upload cover first (if selected)
     let coverUrl = null;
     if (coverFile) {
       const ext = coverFile.name.split('.').pop();
@@ -259,6 +270,40 @@ export default function Library() {
       showNotification(`"${book.title}" moved to ${newStatus.replace('_', ' ')}!`);
     }
   }, [showNotification]);
+
+  // ✅ Edit Book Logic
+  const openEditModal = useCallback((book) => {
+    setEditingBook(book);
+    setEditForm({
+      title: book.title || '',
+      author: book.author || '',
+      genre: book.genre || '',
+      total_pages: book.total_pages || ''
+    });
+  }, []);
+
+  const handleSaveEdit = useCallback(async (e) => {
+    e.preventDefault();
+    if (!editingBook) return;
+
+    const { error } = await supabase
+      .from('books')
+      .update({
+        title: editForm.title,
+        author: editForm.author,
+        genre: editForm.genre,
+        total_pages: editForm.total_pages ? parseInt(editForm.total_pages, 10) : null
+      })
+      .eq('id', editingBook.id);
+
+    if (error) {
+      showNotification('Failed to update book.', 'error');
+    } else {
+      setBooks(prev => prev.map(b => b.id === editingBook.id ? { ...b, ...editForm, total_pages: editForm.total_pages ? parseInt(editForm.total_pages, 10) : b.total_pages } : b));
+      setEditingBook(null);
+      showNotification('Book details updated successfully!');
+    }
+  }, [editingBook, editForm, showNotification]);
 
   const requestDelete = useCallback((book) => {
     setDeleteTarget(book);
@@ -330,8 +375,7 @@ export default function Library() {
         </div>
       )}
 
-           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 animate-fade-in-up">
-        {/* title + book grouped together, side by side */}
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 animate-fade-in-up">
         <div className="flex items-end gap-6">
           <div>
             <p className="eyebrow mb-2">The Collection</p>
@@ -341,12 +385,14 @@ export default function Library() {
           </div>
           <FlippingBook />
         </div>
-        <button
-          onClick={() => setIsAdding(!isAdding)}
-          className="flex items-center gap-2 bg-yale-blue text-page-cream px-5 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all"
-        >
-          <Plus size={16} /> {isAdding ? 'Cancel' : 'Add Book'}
-        </button>
+        <div className="sm:flex-1 flex sm:justify-end">
+          <button
+            onClick={() => setIsAdding(!isAdding)}
+            className="flex items-center gap-2 bg-yale-blue text-page-cream px-5 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all"
+          >
+            <Plus size={16} /> {isAdding ? 'Cancel' : 'Add Book'}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-fade-in-up">
@@ -434,7 +480,6 @@ export default function Library() {
             <span className="font-body text-xs text-coffee-cream italic">{newBook.cover_color}</span>
           </div>
 
-          {/* ✅ NEW: Cover image upload with live preview */}
           <div className="flex items-center gap-3">
             <label className="font-label text-xs uppercase tracking-wider text-coffee-cream">Cover Image:</label>
             <input type="file" accept="image/*" id="cover-input" className="hidden" onChange={handleCoverChange} />
@@ -505,8 +550,46 @@ export default function Library() {
               onSelect={setSelectedBook}
               onStatusChange={updateStatus}
               onDelete={requestDelete}
+              onEdit={openEditModal}
             />
           ))}
+        </div>
+      )}
+
+      {/* ✅ Edit Book Modal */}
+      {editingBook && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-library-ink/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-page-cream p-8 rounded-sm shadow-2xl border border-coffee-cream/20 w-full max-w-md relative">
+            <button onClick={() => setEditingBook(null)} className="absolute top-4 right-4 text-coffee-cream hover:text-maple-rust">
+              <X size={20} />
+            </button>
+            <h2 className="font-display text-2xl text-yale-blue mb-6">Edit Book Details</h2>
+            <form onSubmit={handleSaveEdit} className="space-y-4">
+              <input
+                type="text" placeholder="Title" required value={editForm.title}
+                onChange={e => setEditForm({...editForm, title: e.target.value})}
+                className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:ring-2 focus:ring-maple-rust/25 font-body"
+              />
+              <input
+                type="text" placeholder="Author" value={editForm.author}
+                onChange={e => setEditForm({...editForm, author: e.target.value})}
+                className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:ring-2 focus:ring-maple-rust/25 font-body"
+              />
+              <input
+                type="text" placeholder="Genre" value={editForm.genre}
+                onChange={e => setEditForm({...editForm, genre: e.target.value})}
+                className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:ring-2 focus:ring-maple-rust/25 font-body"
+              />
+              <input
+                type="number" placeholder="Total Pages" value={editForm.total_pages}
+                onChange={e => setEditForm({...editForm, total_pages: e.target.value})}
+                className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:ring-2 focus:ring-maple-rust/25 font-body"
+              />
+              <button type="submit" className="w-full bg-maple-rust text-page-cream px-6 py-3 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-colors">
+                Save Changes
+              </button>
+            </form>
+          </div>
         </div>
       )}
 

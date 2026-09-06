@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import {
   ArrowLeft, FileText, Lightbulb, Quote, BookOpen, Trash2, Upload, Loader2,
-  Sparkles, X, Save, CheckCircle, Image as ImageIcon, Zap
+  Sparkles, X, Save, CheckCircle, Image as ImageIcon
 } from 'lucide-react';
 import { extractTextFromPDF, extractCoverFromPDF } from '../utils/pdfWorker';
 
@@ -26,22 +26,28 @@ export default function BookDetail({ book, onBack }) {
   const [fromPage, setFromPage] = useState('');
   const [toPage, setToPage] = useState('');
   const [retryMessage, setRetryMessage] = useState('');
-  const [cacheHit, setCacheHit] = useState(false); // ✅ NEW: track if loaded from cache
+  const [cacheHit, setCacheHit] = useState(false);
 
   // 📖 Reading Progress states
   const [progressPage, setProgressPage] = useState('');
   const [totalInput, setTotalInput] = useState('');
   const [savingProgress, setSavingProgress] = useState(false);
 
-  const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
-  
   // 💭 Personal Reflection states
-  const [personalReflection, setPersonalReflection] = useState(book.personal_reflection || '');
+  const [personalReflection, setPersonalReflection] = useState(currentBook?.personal_reflection || '');
   const [editingReflection, setEditingReflection] = useState(false);
   const [savingReflection, setSavingReflection] = useState(false);
 
   const [uploadingCover, setUploadingCover] = useState(false);
   const coverInputRef = useRef(null);
+
+  const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
+
+  // ✅ NEW: Global request queue and cooldown to prevent rate limiting
+  const requestQueue = useRef([]);
+  const isProcessing = useRef(false);
+  const lastRequestTime = useRef(0);
+  const MIN_REQUEST_INTERVAL_MS = 10000; // 5 seconds between ANY two Groq calls
 
   useEffect(() => {
     if (currentBook) fetchNotes();
@@ -68,7 +74,7 @@ export default function BookDetail({ book, onBack }) {
     setLoading(false);
   };
 
-  // 📕 Upload the book's PDF (viewer + AI text + auto cover from page 1)
+  // 📕 Upload the book's PDF
   const handleBookPDFUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || file.type !== 'application/pdf') return;
@@ -76,7 +82,6 @@ export default function BookDetail({ book, onBack }) {
     setUploadingPDF(true);
     try {
       const extractedText = await extractTextFromPDF(file);
-
       const fileExt = file.name.split('.').pop();
       const fileName = `${user.id}/books/${Date.now()}.${fileExt}`;
 
@@ -92,7 +97,6 @@ export default function BookDetail({ book, onBack }) {
 
       const updates = { pdf_url: publicUrl, file_path: fileName, ai_text_content: extractedText };
 
-      // 🖼️ AUTO-COVER: render page 1 as the cover (only if no cover exists yet)
       if (!currentBook.cover_url) {
         try {
           const coverBlob = await extractCoverFromPDF(file);
@@ -111,11 +115,7 @@ export default function BookDetail({ book, onBack }) {
         }
       }
 
-      const { error } = await supabase
-        .from('books')
-        .update(updates)
-        .eq('id', currentBook.id);
-
+      const { error } = await supabase.from('books').update(updates).eq('id', currentBook.id);
       if (error) throw error;
 
       setCurrentBook({ ...currentBook, ...updates });
@@ -131,6 +131,46 @@ export default function BookDetail({ book, onBack }) {
     }
     setUploadingPDF(false);
     e.target.value = '';
+  };
+
+  // 🗑️ Remove the uploaded PDF
+  const handleDeletePDF = async () => {
+    if (!currentBook.file_path) return;
+    if (!window.confirm("Are you sure you want to remove the PDF? The Librarian will no longer be able to read this book, but the book itself will remain in your library.")) return;
+
+    setUploadingPDF(true);
+    try {
+      const { error: storageError } = await supabase.storage
+        .from('pdf-documents')
+        .remove([currentBook.file_path]);
+      
+      if (storageError) throw storageError;
+
+      const { error: dbError } = await supabase
+        .from('books')
+        .update({ 
+          pdf_url: null, 
+          file_path: null, 
+          ai_text_content: null 
+        })
+        .eq('id', currentBook.id);
+        
+      if (dbError) throw dbError;
+
+      setCurrentBook(prev => ({ 
+        ...prev, 
+        pdf_url: null, 
+        file_path: null, 
+        ai_text_content: null 
+      }));
+      setUsePdfText(false);
+      showNotification("PDF removed successfully. The book remains in your library.");
+    } catch (err) {
+      console.error('Delete PDF error:', err);
+      showNotification(`Failed to remove PDF: ${err.message}`, 'error');
+    } finally {
+      setUploadingPDF(false);
+    }
   };
 
   // 🖼️ Upload / change the book cover
@@ -150,10 +190,7 @@ export default function BookDetail({ book, onBack }) {
 
       const publicUrl = supabase.storage.from('pdf-documents').getPublicUrl(path).data.publicUrl;
 
-      const { error } = await supabase
-        .from('books')
-        .update({ cover_url: publicUrl })
-        .eq('id', currentBook.id);
+      const { error } = await supabase.from('books').update({ cover_url: publicUrl }).eq('id', currentBook.id);
       if (error) throw error;
 
       setCurrentBook({ ...currentBook, cover_url: publicUrl });
@@ -165,7 +202,7 @@ export default function BookDetail({ book, onBack }) {
     e.target.value = '';
   };
 
-  // 📖 Save reading progress to database
+  // 📖 Save reading progress
   const updateProgress = async (page, total) => {
     const totalPages = total !== undefined && total !== ''
       ? (parseInt(total, 10) || null)
@@ -222,7 +259,7 @@ export default function BookDetail({ book, onBack }) {
     showNotification('Reflection saved!');
   };
 
-  // 📄 Extract only the text between page X and page Y
+  // 📄 Extract text between page X and page Y
   const getPageRangeText = (from, to) => {
     const content = currentBook.ai_text_content || '';
     if (!content) return '';
@@ -242,32 +279,28 @@ export default function BookDetail({ book, onBack }) {
     return result.trim();
   };
 
-  // ✅ Generate a cache key for the AI request
+  // ✅ Generate cache key
   const generateCacheKey = (action, from, to, text) => {
     const source = usePdfText ? `pages-${from}-${to}` : text.substring(0, 100);
     return `${currentBook.id}_${action}_${source}`;
   };
 
-  // ✅ Check cache before calling AI
+  // ✅ Check cache
   const checkCache = (action, from, to, text) => {
     const cacheKey = generateCacheKey(action, from, to, text);
     const fieldName = action === 'summarize' ? 'ai_summary' : action === 'explain' ? 'ai_explanation' : 'ai_quotes';
     
-    // Look for a note with matching original_text (our cache key)
-    const cached = notes.find(note => 
-      note.original_text === cacheKey && note[fieldName]
-    );
-    
+    const cached = notes.find(note => note.original_text === cacheKey && note[fieldName]);
     return cached ? cached[fieldName] : null;
   };
 
-  // ✅ Auto-save AI response to cache
+  // ✅ Auto-save to cache
   const saveToCache = async (action, from, to, text, aiResult) => {
     const cacheKey = generateCacheKey(action, from, to, text);
     const noteData = {
       user_id: user.id,
       book_id: currentBook.id,
-      original_text: cacheKey, // Store cache key instead of user text
+      original_text: cacheKey,
     };
     
     if (action === 'summarize') noteData.ai_summary = aiResult;
@@ -276,35 +309,95 @@ export default function BookDetail({ book, onBack }) {
 
     const { error } = await supabase.from('book_notes').insert([noteData]);
     if (!error) {
-      await fetchNotes(); // Refresh notes to include the new cache entry
+      await fetchNotes();
     }
   };
 
-  // ✅ Retry wrapper for Supabase Edge Functions
-  const invokeWithRetry = async (functionName, body, maxRetries = 3) => {
-    let delay = 2500;
+ // ✅ Retry wrapper with exponential backoff
+const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
+  let delay = 15000; // Start with 15 second delay
+  
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    const { data, error } = await supabase.functions.invoke(functionName, { body });
     
-    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-      const { data, error } = await supabase.functions.invoke(functionName, { body });
-      
-      if (error && error.message && error.message.includes('429')) {
-        if (attempt <= maxRetries) {
-          setRetryMessage(`The librarian is catching her breath... retry ${attempt}/${maxRetries} in ${Math.round(delay / 1000)}s`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          delay *= 2;
-          continue;
-        }
+    if (error && error.message && error.message.includes('429')) {
+      if (attempt <= maxRetries) {
+        setRetryMessage(`Groq is busy. Waiting ${Math.round(delay / 1000)}s before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 1.5; // Slower exponential backoff
+        continue;
+      } else {
+        // Final failure - give up and show friendly message
+        return { 
+          data: null, 
+          error: new Error('The librarian is overwhelmed. Please wait 60 seconds and try again.') 
+        };
       }
-      
-      setRetryMessage('');
-      return { data, error };
     }
     
-    return { data: null, error: new Error('Max retries exceeded') };
+    setRetryMessage('');
+    return { data, error };
+  }
+  
+  return { data: null, error: new Error('Max retries exceeded') };
+};
+
+  // ✅ Process the request queue, always respecting the global cooldown
+  const processQueue = async () => {
+    if (isProcessing.current || requestQueue.current.length === 0) return;
+
+    isProcessing.current = true;
+
+    while (requestQueue.current.length > 0) {
+      const { action, resolve } = requestQueue.current.shift();
+
+      // Wait out whatever's left of the cooldown since the last Groq call
+      const elapsed = Date.now() - lastRequestTime.current;
+      if (elapsed < MIN_REQUEST_INTERVAL_MS && lastRequestTime.current > 0) {
+        const waitTime = MIN_REQUEST_INTERVAL_MS - elapsed;
+        setRetryMessage(`The librarian is catching her breath... waiting ${Math.ceil(waitTime / 1000)}s`);
+        await new Promise(r => setTimeout(r, waitTime));
+        setRetryMessage('');
+      }
+
+      try {
+        const result = await executeAnalysis(action);
+        resolve(result);
+      } catch (error) {
+        resolve({ error });
+      } finally {
+        // Update the timestamp after the request completes (success or failure)
+        lastRequestTime.current = Date.now();
+      }
+    }
+
+    isProcessing.current = false;
   };
 
-  // 🤖 Analyze excerpt or full PDF text (with caching)
-  const handleAnalyze = async (action) => {
+  // 🤖 Analyze with queue system and PRE-QUEUE cache check
+  const handleAnalyze = (action) => {
+    return new Promise((resolve) => {
+      const f = Math.max(1, parseInt(fromPage, 10) || 1);
+      const t = Math.max(f, parseInt(toPage, 10) || f);
+      const sourceText = usePdfText
+        ? getPageRangeText(f, t)
+        : (inputText.trim() || (currentBook.ai_text_content || ''));
+
+      // ✅ PRE-QUEUE CACHE CHECK: If cached, resolve immediately without touching the queue or cooldown
+      const cachedResult = checkCache(action, f, t, sourceText);
+      if (cachedResult) {
+        resolve({ result: cachedResult, cacheHit: true });
+        return;
+      }
+
+      // Not cached? Add to queue and process.
+      requestQueue.current.push({ action, resolve });
+      processQueue();
+    });
+  };
+
+  // ✅ Execute a single analysis (Network call only)
+  const executeAnalysis = async (action) => {
     const f = Math.max(1, parseInt(fromPage, 10) || 1);
     const t = Math.max(f, parseInt(toPage, 10) || f);
     const scope = usePdfText ? `pages ${f} to ${t}` : 'this excerpt';
@@ -314,59 +407,50 @@ export default function BookDetail({ book, onBack }) {
       : (inputText.trim() || (currentBook.ai_text_content || ''));
 
     if (!sourceText) {
-      showNotification(usePdfText
+      throw new Error(usePdfText
         ? 'No text found in that page range. Check the page numbers.'
-        : 'Paste an excerpt or upload the book PDF first.', 'error');
-      return;
+        : 'Paste an excerpt or upload the book PDF first.');
     }
 
+    let systemPrompt = '';
+    let charLimit = 12000;
+    
+    if (action === 'summarize') {
+      systemPrompt = `Provide a concise, clear summary of ${scope} from "${currentBook.title}". Focus on the main ideas and key takeaways in 2-3 paragraphs.`;
+    } else if (action === 'explain') {
+      systemPrompt = `Explain ${scope} from "${currentBook.title}" in simple, clear terms. Break down any complex concepts or jargon.`;
+    } else if (action === 'quotes') {
+      systemPrompt = `Extract exactly 3 to 5 of the most beautiful, meaningful or powerful quotes from ${scope} of "${currentBook.title}". Return each quote on its own line, wrapped in quotation marks, followed by a brief one-line interpretation. Do NOT exceed 5 quotes.`;
+      charLimit = 8000;
+    }
+
+    const { data, error } = await invokeWithRetry('summarize-text', {
+      text: sourceText.substring(0, charLimit),
+      action,
+      custom_prompt: systemPrompt
+    });
+
+    if (error) throw new Error(error.message || 'Failed to analyze');
+    
+    await saveToCache(action, f, t, sourceText, data.result);
+    
+    return { result: data.result, cacheHit: false };
+  };
+
+  // ✅ Updated button handlers that use the queue
+  const handleSummarize = async () => {
     setAnalyzing(true);
-    setActiveAction(action);
+    setActiveAction('summarize');
     setResult('');
     setJustSaved(false);
     setRetryMessage('');
     setCacheHit(false);
 
     try {
-      // ✅ CHECK CACHE FIRST
-      const cachedResult = checkCache(action, f, t, sourceText);
-      if (cachedResult) {
-        setResult(cachedResult);
-        setCacheHit(true);
-        setAnalyzing(false);
-        showNotification(`Loaded from cache! (Instant ⚡)`);
-        return;
-      }
-
-      // ✅ NOT IN CACHE — call AI
-      let systemPrompt = '';
-      let charLimit = 12000;
-      
-      if (action === 'summarize') {
-        systemPrompt = `Provide a concise, clear summary of ${scope} from "${currentBook.title}". Focus on the main ideas and key takeaways in 2-3 paragraphs.`;
-        charLimit = 12000;
-      } else if (action === 'explain') {
-        systemPrompt = `Explain ${scope} from "${currentBook.title}" in simple, clear terms. Break down any complex concepts or jargon.`;
-        charLimit = 12000;
-      } else if (action === 'quotes') {
-        systemPrompt = `Extract exactly 3 to 5 of the most beautiful, meaningful or powerful quotes from ${scope} of "${currentBook.title}". Return each quote on its own line, wrapped in quotation marks, followed by a brief one-line interpretation. Do NOT exceed 5 quotes.`;
-        charLimit = 8000;
-      }
-
-      const { data, error } = await invokeWithRetry('summarize-text', {
-        text: sourceText.substring(0, charLimit),
-        action,
-        custom_prompt: systemPrompt
-      });
-
-      if (error) throw new Error(error.message || 'Failed to analyze');
-      
-      setResult(data.result);
-      showNotification(`Analysis of ${scope} complete!`);
-      
-      // ✅ AUTO-SAVE TO CACHE
-      await saveToCache(action, f, t, sourceText, data.result);
-      
+      const { result, cacheHit: hit } = await handleAnalyze('summarize');
+      setResult(result);
+      setCacheHit(hit);
+      showNotification(hit ? 'Loaded from cache! (Instant ⚡)' : 'Summary complete!');
     } catch (err) {
       console.error('Analysis error:', err);
       showNotification(`Failed to analyze: ${err.message}`, 'error');
@@ -375,15 +459,60 @@ export default function BookDetail({ book, onBack }) {
     setRetryMessage('');
   };
 
-  // 💾 Save AI result as note (manual save still works)
+  const handleExplain = async () => {
+    setAnalyzing(true);
+    setActiveAction('explain');
+    setResult('');
+    setJustSaved(false);
+    setRetryMessage('');
+    setCacheHit(false);
+
+    try {
+      const { result, cacheHit: hit } = await handleAnalyze('explain');
+      setResult(result);
+      setCacheHit(hit);
+      showNotification(hit ? 'Loaded from cache! (Instant ⚡)' : 'Explanation complete!');
+    } catch (err) {
+      console.error('Analysis error:', err);
+      showNotification(`Failed to analyze: ${err.message}`, 'error');
+    }
+    setAnalyzing(false);
+    setRetryMessage('');
+  };
+
+  const handleQuotes = async () => {
+    setAnalyzing(true);
+    setActiveAction('quotes');
+    setResult('');
+    setJustSaved(false);
+    setRetryMessage('');
+    setCacheHit(false);
+
+    try {
+      const { result, cacheHit: hit } = await handleAnalyze('quotes');
+      setResult(result);
+      setCacheHit(hit);
+      showNotification(hit ? 'Loaded from cache! (Instant ⚡)' : 'Quotes extracted!');
+    } catch (err) {
+      console.error('Analysis error:', err);
+      showNotification(`Failed to analyze: ${err.message}`, 'error');
+    }
+    setAnalyzing(false);
+    setRetryMessage('');
+  };
+
+  // 💾 Save AI result as note
   const handleSaveNote = async () => {
     if (!result || !activeAction) return;
 
     const noteData = {
       user_id: user.id,
       book_id: currentBook.id,
-      original_text: inputText.trim() ? inputText.trim().substring(0, 600) : '',
+      original_text: inputText.trim() 
+        ? inputText.trim().substring(0, 600) 
+        : (usePdfText ? `Pages ${fromPage || 1}-${toPage || 'end'}` : ''),
     };
+    
     if (activeAction === 'summarize') noteData.ai_summary = result;
     else if (activeAction === 'explain') noteData.ai_explanation = result;
     else if (activeAction === 'quotes') noteData.ai_quotes = result;
@@ -450,7 +579,7 @@ export default function BookDetail({ book, onBack }) {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <button onClick={onBack} className="p-2 rounded-sm hover:bg-coffee-cream/10 transition-colors">
             <ArrowLeft size={20} className="text-coffee-cream" />
@@ -463,12 +592,12 @@ export default function BookDetail({ book, onBack }) {
             />
           )}
           <div>
-            <h1 className="font-display text-3xl text-yale-blue">{currentBook.title}</h1>
+            <h1 className="font-display text-2xl sm:text-3xl text-yale-blue">{currentBook.title}</h1>
             <p className="font-body text-sm text-coffee-cream italic">by {currentBook.author}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <input type="file" accept="image/*" ref={coverInputRef} className="hidden" onChange={handleCoverUpload} />
           <button
             onClick={() => coverInputRef.current?.click()}
@@ -480,14 +609,26 @@ export default function BookDetail({ book, onBack }) {
           </button>
 
           <input type="file" accept=".pdf,application/pdf" ref={fileInputRef} className="hidden" onChange={handleBookPDFUpload} />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploadingPDF}
-            className="flex items-center gap-2 bg-maple-rust text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50"
-          >
-            {uploadingPDF ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-            {uploadingPDF ? 'Uploading...' : 'Upload PDF'}
-          </button>
+          
+          {currentBook.file_path ? (
+            <button
+              onClick={handleDeletePDF}
+              disabled={uploadingPDF}
+              className="flex items-center gap-2 bg-maple-rust/10 border border-maple-rust/30 text-maple-rust px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust hover:text-page-cream transition-all disabled:opacity-50"
+            >
+              {uploadingPDF ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              {uploadingPDF ? 'Processing...' : 'Remove PDF'}
+            </button>
+          ) : (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadingPDF}
+              className="flex items-center gap-2 bg-maple-rust text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50"
+            >
+              {uploadingPDF ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+              {uploadingPDF ? 'Uploading...' : 'Upload PDF'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -642,7 +783,6 @@ export default function BookDetail({ book, onBack }) {
             : `Paste a passage from "${currentBook.title}", or upload the PDF so I can read it for you.`}
         </p>
 
-        {/* 📄 Bouton : Analyze the full PDF directly */}
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -709,7 +849,6 @@ export default function BookDetail({ book, onBack }) {
           className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm h-32 resize-y disabled:opacity-50"
         />
 
-        {/* ✅ Retry message */}
         {retryMessage && (
           <div className="flex items-center gap-2 p-3 bg-gilmore-gold/10 border border-gilmore-gold/30 rounded-sm animate-fade-in-up">
             <Loader2 size={16} className="animate-spin text-gilmore-gold" />
@@ -718,14 +857,29 @@ export default function BookDetail({ book, onBack }) {
         )}
 
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => handleAnalyze('summarize')} disabled={analyzing} className="flex items-center gap-2 bg-yale-blue text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
-            {analyzing && activeAction === 'summarize' ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />} Summarize
+          <button 
+            onClick={handleSummarize} 
+            disabled={analyzing} 
+            className="flex items-center gap-2 bg-yale-blue text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50"
+          >
+            {analyzing && activeAction === 'summarize' ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />} 
+            {analyzing && activeAction !== 'summarize' ? 'Waiting...' : 'Summarize'}
           </button>
-          <button onClick={() => handleAnalyze('explain')} disabled={analyzing} className="flex items-center gap-2 bg-porch-sage text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
-            {analyzing && activeAction === 'explain' ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />} Explain Simply
+          <button 
+            onClick={handleExplain} 
+            disabled={analyzing} 
+            className="flex items-center gap-2 bg-porch-sage text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50"
+          >
+            {analyzing && activeAction === 'explain' ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />} 
+            {analyzing && activeAction !== 'explain' ? 'Waiting...' : 'Explain Simply'}
           </button>
-          <button onClick={() => handleAnalyze('quotes')} disabled={analyzing} className="flex items-center gap-2 bg-gilmore-gold text-yale-blue px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust hover:text-page-cream transition-all disabled:opacity-50">
-            {analyzing && activeAction === 'quotes' ? <Loader2 size={14} className="animate-spin" /> : <Quote size={14} />} Extract Quotes
+          <button 
+            onClick={handleQuotes} 
+            disabled={analyzing} 
+            className="flex items-center gap-2 bg-gilmore-gold text-yale-blue px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust hover:text-page-cream transition-all disabled:opacity-50"
+          >
+            {analyzing && activeAction === 'quotes' ? <Loader2 size={14} className="animate-spin" /> : <Quote size={14} />} 
+            {analyzing && activeAction !== 'quotes' ? 'Waiting...' : 'Extract Quotes'}
           </button>
         </div>
 
