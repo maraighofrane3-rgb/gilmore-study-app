@@ -29,11 +29,9 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   
-  // ✅ États pour la suppression de compte
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // ✅ Fixed: Added missing comma and notifications_enabled
   const [profile, setProfile] = useState({
     username: '', bio: '', theme: 'paper',
     default_pomodoro_duration: 25, default_daily_goal_hours: 2, 
@@ -62,7 +60,7 @@ export default function Settings() {
         default_pomodoro_duration: data.default_pomodoro_duration || 25,
         default_daily_goal_hours: data.default_daily_goal_hours || 2,
         email_notifications: data.email_notifications !== false,
-        notifications_enabled: data.notifications_enabled !== false // ✅ Added
+        notifications_enabled: data.notifications_enabled !== false
       });
     }
     setLoading(false);
@@ -104,7 +102,6 @@ export default function Settings() {
     setSaving(false);
   };
 
-  // ✅ Suppression du compte via Edge Function
   const handleDeleteAccount = async () => {
     setIsDeleting(true);
     try {
@@ -112,7 +109,7 @@ export default function Settings() {
       if (error) throw error;
       
       await supabase.auth.signOut();
-      window.location.href = '/'; // Redirection propre vers l'accueil
+      window.location.href = '/';
     } catch (err) {
       console.error('Error deleting account:', err);
       setMessage({ type: 'error', text: 'Failed to delete account. Please try again.' });
@@ -121,9 +118,19 @@ export default function Settings() {
     }
   };
 
-  const handlePickTheme = (id) => {
+  // ✅ FIX: Auto-save theme to database immediately when clicked
+  const handlePickTheme = async (id) => {
     setTheme(id);
     setProfile(prev => ({ ...prev, theme: id }));
+    
+    const { error } = await supabase
+      .from('profiles')
+      .update({ theme: id })
+      .eq('id', user.id);
+      
+    if (error) {
+      console.error('Failed to save theme to database:', error);
+    }
   };
 
   if (loading) return <div className="text-center py-20 text-coffee-cream italic font-body">Loading settings...</div>;
@@ -146,7 +153,6 @@ export default function Settings() {
       )}
 
       <div className="flex flex-col md:flex-row gap-8">
-        {/* Sidebar Tabs */}
         <div className="md:w-48 shrink-0">
           <nav className="flex md:flex-col gap-2 overflow-x-auto md:overflow-visible pb-2 md:pb-0">
             {TABS.map(tab => {
@@ -168,15 +174,13 @@ export default function Settings() {
           </nav>
         </div>
 
-        {/* Content Area */}
         <div className="flex-1 bg-page-cream p-8 rounded-sm border border-coffee-cream/20 shadow-cozy">
-
           {activeTab === 'account' && (
             <div className="space-y-6">
               <form onSubmit={handleSaveProfile} className="space-y-6">
                 <h2 className="font-display text-2xl text-yale-blue mb-4">Profile Information</h2>
                 <div>
-                  <label className="block font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-1.5">Username</label>
+                  <label className="block font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream mb-1.5">Username</label>
                   <input
                     type="text" value={profile.username}
                     onChange={e => setProfile({...profile, username: e.target.value})}
@@ -184,7 +188,7 @@ export default function Settings() {
                   />
                 </div>
                 <div>
-                  <label className="block font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-1.5">Bio</label>
+                  <label className="block font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream mb-1.5">Bio</label>
                   <textarea
                     value={profile.bio}
                     onChange={e => setProfile({...profile, bio: e.target.value})}
@@ -193,15 +197,14 @@ export default function Settings() {
                   />
                 </div>
                 <div>
-                  <label className="block font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-1.5">Email</label>
+                  <label className="block font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream mb-1.5">Email</label>
                   <input type="email" value={user?.email || ''} disabled className="w-full p-3 bg-parchment/50 border border-coffee-cream/10 rounded-sm font-body text-coffee-cream/50 cursor-not-allowed" />
                 </div>
-                <button type="submit" disabled={saving} className="flex items-center gap-2 bg-maple-rust text-page-cream px-6 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider-label hover:bg-yale-blue transition-colors disabled:opacity-50">
+                <button type="submit" disabled={saving} className="flex items-center gap-2 bg-maple-rust text-page-cream px-6 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-colors disabled:opacity-50">
                   <Save size={16} /> {saving ? 'Saving...' : 'Save Changes'}
                 </button>
               </form>
 
-              {/* 🚨 DANGER ZONE */}
               <div className="mt-12 pt-8 border-t border-coffee-cream/20">
                 <h3 className="font-display text-xl text-maple-rust flex items-center gap-2 mb-2">
                   <AlertTriangle size={20} /> Danger Zone
@@ -225,7 +228,6 @@ export default function Settings() {
             <div className="space-y-6">
               <h2 className="font-display text-2xl text-yale-blue mb-4">Privacy & Security</h2>
               
-              {/* ✅ Email Notifications Toggle */}
               <div className="flex items-center justify-between p-4 bg-parchment rounded-sm border border-coffee-cream/10">
                 <div>
                   <h3 className="font-body text-library-ink font-medium">Email Notifications</h3>
@@ -254,7 +256,6 @@ export default function Settings() {
                 </label>
               </div>
 
-              {/* ✅ OS Study Reminders Toggle */}
               <div className="flex items-center justify-between p-4 bg-parchment rounded-sm border border-coffee-cream/10">
                 <div>
                   <h3 className="font-body text-library-ink font-medium">Study Reminders</h3>
@@ -302,7 +303,7 @@ export default function Settings() {
                   onChange={e => setPasswordData({...passwordData, confirmPassword: e.target.value})}
                   className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:ring-2 focus:ring-maple-rust/25 focus:border-maple-rust font-body transition-colors"
                 />
-                <button type="submit" disabled={saving} className="flex items-center gap-2 bg-yale-blue text-page-cream px-6 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider-label hover:bg-maple-rust transition-colors disabled:opacity-50">
+                <button type="submit" disabled={saving} className="flex items-center gap-2 bg-yale-blue text-page-cream px-6 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-colors disabled:opacity-50">
                   <Lock size={16} /> Update Password
                 </button>
               </form>
@@ -312,8 +313,8 @@ export default function Settings() {
           {activeTab === 'appearance' && (
             <div className="space-y-6">
               <h2 className="font-display text-2xl text-yale-blue mb-1">Appearance</h2>
-              <p className="font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-3">
-                Select a theme
+              <p className="font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream mb-3">
+                Select a theme (saves automatically)
               </p>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -323,7 +324,7 @@ export default function Settings() {
                     onClick={() => handlePickTheme(t.id)}
                     className={`relative text-left p-4 rounded-sm border transition-all ${
                       theme === t.id
-                        ? 'border-maple-rust shadow-cozy'
+                        ? 'border-maple-rust shadow-cozy ring-2 ring-maple-rust/20'
                         : 'border-coffee-cream/20 hover:border-maple-rust/40'
                     }`}
                     style={{ backgroundColor: t.swatch[0] }}
@@ -341,10 +342,6 @@ export default function Settings() {
                   </button>
                 ))}
               </div>
-
-              <button onClick={handleSaveProfile} disabled={saving} className="flex items-center gap-2 bg-maple-rust text-page-cream px-6 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider-label hover:bg-yale-blue transition-colors disabled:opacity-50">
-                <Save size={16} /> {saving ? 'Saving...' : 'Save Preferences'}
-              </button>
             </div>
           )}
 
@@ -352,7 +349,7 @@ export default function Settings() {
             <form onSubmit={handleSaveProfile} className="space-y-6">
               <h2 className="font-display text-2xl text-yale-blue mb-4">Productivity Defaults</h2>
               <div>
-                <label className="block font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-1.5">Default Pomodoro Duration (minutes)</label>
+                <label className="block font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream mb-1.5">Default Pomodoro Duration (minutes)</label>
                 <input
                   type="number" min="5" max="120" value={profile.default_pomodoro_duration}
                   onChange={e => setProfile({...profile, default_pomodoro_duration: parseInt(e.target.value)})}
@@ -360,23 +357,21 @@ export default function Settings() {
                 />
               </div>
               <div>
-                <label className="block font-label text-[0.65rem] uppercase tracking-wider-label text-coffee-cream mb-1.5">Default Daily Focus Goal (hours)</label>
+                <label className="block font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream mb-1.5">Default Daily Focus Goal (hours)</label>
                 <input
                   type="number" min="0.5" max="24" step="0.5" value={profile.default_daily_goal_hours}
                   onChange={e => setProfile({...profile, default_daily_goal_hours: parseFloat(e.target.value)})}
                   className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:ring-2 focus:ring-maple-rust/25 focus:border-maple-rust font-body transition-colors"
                 />
               </div>
-              <button type="submit" disabled={saving} className="flex items-center gap-2 bg-maple-rust text-page-cream px-6 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider-label hover:bg-yale-blue transition-colors disabled:opacity-50">
+              <button type="submit" disabled={saving} className="flex items-center gap-2 bg-maple-rust text-page-cream px-6 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-colors disabled:opacity-50">
                 <Save size={16} /> {saving ? 'Saving...' : 'Save Defaults'}
               </button>
             </form>
           )}
-
         </div>
       </div>
 
-      {/* ✅ Modal de confirmation pour la suppression */}
       <ConfirmDialog
         open={showDeleteConfirm}
         title="Are you absolutely sure?"
