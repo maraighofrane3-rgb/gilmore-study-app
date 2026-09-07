@@ -310,11 +310,11 @@ export default function Settings() {
             </div>
           )}
 
-          {activeTab === 'appearance' && (
+                    {activeTab === 'appearance' && (
             <div className="space-y-6">
               <h2 className="font-display text-2xl text-yale-blue mb-1">Appearance</h2>
               <p className="font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream mb-3">
-                Select a theme (saves automatically)
+                Select a theme
               </p>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -342,6 +342,15 @@ export default function Settings() {
                   </button>
                 ))}
               </div>
+
+              {/* ✅ Save Button Added Back */}
+              <button 
+                onClick={handleSaveProfile} 
+                disabled={saving} 
+                className="flex items-center gap-2 bg-maple-rust text-page-cream px-6 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-colors disabled:opacity-50"
+              >
+                <Save size={16} /> {saving ? 'Saving...' : 'Save Preferences'}
+              </button>
             </div>
           )}
 
