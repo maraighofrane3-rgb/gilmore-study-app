@@ -66,23 +66,39 @@ export default function Settings() {
     setLoading(false);
   };
 
-  const handleSaveProfile = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    setMessage({ type: '', text: '' });
+ const handleSaveProfile = async (e) => {
+  e.preventDefault();
+  setSaving(true);
+  setMessage({ type: '', text: '' });
 
-    const { error } = await supabase
-      .from('profiles')
-      .update(profile)
-      .eq('id', user.id);
-
-    if (error) {
-      setMessage({ type: 'error', text: 'Failed to save settings.' });
-    } else {
-      setMessage({ type: 'success', text: 'Settings saved successfully.' });
-    }
-    setSaving(false);
+  // ✅ Only update allowed fields (exclude id, email, etc.)
+  const updates = {
+    username: profile.username,
+    bio: profile.bio,
+    theme: profile.theme,
+    default_pomodoro_duration: parseInt(profile.default_pomodoro_duration) || 25,
+    default_daily_goal_hours: parseFloat(profile.default_daily_goal_hours) || 2,
+    email_notifications: profile.email_notifications,
+    notifications_enabled: profile.notifications_enabled,
+    updated_at: new Date().toISOString()
   };
+
+  console.log('Saving updates:', updates);
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .update(updates)
+    .eq('id', user.id);
+
+  if (error) {
+    console.error('Save error:', error);
+    setMessage({ type: 'error', text: `Failed to save: ${error.message}` });
+  } else {
+    console.log('Save successful:', data);
+    setMessage({ type: 'success', text: 'Settings saved successfully.' });
+  }
+  setSaving(false);
+};
 
   const handleChangePassword = async (e) => {
     e.preventDefault();
