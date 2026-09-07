@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { serve } from "https://deno.land/std@0.192.0/http/server.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,86 +12,112 @@ serve(async (req) => {
   }
 
   try {
-    const apiKey = Deno.env.get('GROQ_API_KEY')
+    const apiKey = Deno.env.get('GEMINI_API_KEY')
+    console.log('API Key exists:', !!apiKey)
+    
     if (!apiKey) {
-      throw new Error('GROQ_API_KEY is missing in Supabase Secrets.')
+      throw new Error('GEMINI_API_KEY is missing in Supabase Secrets.')
     }
 
-    // Utilise l'heure locale envoyée par le client si disponible ;
-    // sinon on retombe sur l'heure du serveur (mieux que rien, mais pas fiable)
+    // Get local hour from client or use server time
     let localHour = null
+    let timeOfDay = 'morning'
+    
     try {
       const body = await req.json()
+      console.log('Request body:', body)
       if (typeof body?.localHour === 'number' && body.localHour >= 0 && body.localHour <= 23) {
         localHour = body.localHour
       }
-    } catch {
-      // pas de corps JSON envoyé, on continue avec l'heure serveur
+    } catch (e) {
+      console.log('No JSON body or parse error:', e.message)
     }
 
-    const hour = localHour ?? new Date().getHours()
-    let timeOfDay = 'morning'
+    const hour = localHour ?? new Date().getUTCHours()
     if (hour >= 12 && hour < 17) timeOfDay = 'afternoon'
     else if (hour >= 17) timeOfDay = 'evening'
+    
+    console.log('Time of day:', timeOfDay, '(hour:', hour, ')')
 
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'openai/gpt-oss-120b',
-        reasoning_effort: 'medium',
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: `You are an encouraging, wise, dark-academia-style academic mentor. 
-            Return ONLY valid JSON, no markdown, no explanations. Format:
-            {
-              "greeting": "A warm, personalized greeting for the ${timeOfDay}.",
-              "tip": "A specific, actionable study tip for deep work today (2-3 sentences).",
-              "quote": "A short, inspiring reflection in the spirit of academic wisdom. If you attribute it to a real historical scholar, author, or philosopher, only use a quote you are highly confident is accurately attributed; otherwise write it as an unattributed reflection.",
-              "author": "The author of the quote, or an empty string if unattributed."
-            }`
-          },
-          {
-            role: 'user',
-            content: "Give me my daily study coaching."
+    const prompt = `You are an encouraging, wise, dark-academia-style academic mentor.
+
+Provide a daily study coaching message for the ${timeOfDay}.
+
+Return ONLY valid JSON in this exact format (no markdown, no explanations):
+{
+  "greeting": "A warm, personalized greeting for the ${timeOfDay}.",
+  "tip": "A specific, actionable study tip for deep work today (2-3 sentences).",
+  "quote": "A short, inspiring reflection in the spirit of academic wisdom.",
+  "author": "The author of the quote, or an empty string if unattributed."
+}`
+
+    console.log('Calling Gemini API...')
+    
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.8,
+            maxOutputTokens: 500,
           }
-        ],
-        temperature: 0.8,
-        max_tokens: 300
-      })
-    })
+        })
+      }
+    )
+
+    console.log('Gemini response status:', response.status)
 
     if (!response.ok) {
       const errText = await response.text()
-      throw new Error(`Groq API Error ${response.status}: ${errText}`)
+      console.error('Gemini API error:', errText)
+      throw new Error(`Gemini API Error ${response.status}: ${errText}`)
     }
 
     const data = await response.json()
-    const rawContent = data.choices?.[0]?.message?.content
+    console.log('Gemini response data:', data)
+    
+    const rawContent = data?.candidates?.[0]?.content?.parts?.[0]?.text
 
-    if (!rawContent) throw new Error('Groq returned empty content.')
+    if (!rawContent) {
+      throw new Error('Gemini returned empty response')
+    }
 
-    const cleanJson = rawContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    const cleanJson = rawContent
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .trim()
 
     let aiResponse
     try {
       aiResponse = JSON.parse(cleanJson)
     } catch (parseError) {
-      throw new Error(`Failed to parse model output as JSON. Raw content: ${rawContent}`)
+      console.error('JSON parse error:', parseError)
+      console.error('Raw content:', rawContent)
+      aiResponse = {
+        greeting: `Good ${timeOfDay}, scholar!`,
+        tip: "Focus on one task at a time with deep concentration.",
+        quote: "The mind is not a vessel to be filled, but a fire to be kindled.",
+        author: "Plutarch"
+      }
     }
+
+    console.log('Returning response:', aiResponse)
 
     return new Response(JSON.stringify(aiResponse), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
 
   } catch (error) {
-    console.error('Edge Function Error:', error.message)
-    return new Response(JSON.stringify({ error: error.message }), {
+    console.error('❌ Edge Function Critical Error:', error.message)
+    console.error('Stack:', error.stack)
+    
+    return new Response(JSON.stringify({ 
+      error: error.message,
+      details: error.stack 
+    }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
