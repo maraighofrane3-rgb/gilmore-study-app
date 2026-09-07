@@ -4,62 +4,80 @@ import { useAuth } from '../context/AuthContext';
 
 const ThemeContext = createContext();
 
-// 🎨 Every theme the app can wear
 export const VALID_THEMES = ['paper', 'midnight', 'library', 'cream', 'harvard'];
 
 export const THEMES = [
   { id: 'paper',    label: 'Paper',    emoji: '📜' },
   { id: 'midnight', label: 'Midnight', emoji: '🌙' },
-  { id: 'library',  label: 'Library',  emoji: '📚' },
-  { id: 'cream',    label: 'Cream',    emoji: '☕' },
-  { id: 'harvard',  label: 'Harvard',  emoji: '🎓' },
+  { id: 'library',  label: 'Library',  emoji: '' },
+  { id: 'cream',    label: 'Cream',    emoji: '' },
+  { id: 'harvard',  label: 'Harvard',  emoji: '' },
 ];
 
 export function ThemeProvider({ children }) {
   const { user } = useAuth();
-  
-  // 1. Initialize from localStorage (fallback)
-  const [theme, setTheme] = useState(() => {
-    const saved = localStorage.getItem('theme');
-    return VALID_THEMES.includes(saved) ? saved : 'paper';
-  });
+  const [theme, setTheme] = useState('paper'); // Start with default
+  const [isLoading, setIsLoading] = useState(true); // Track loading state
 
-  // 2. Load theme from database when user logs in
   useEffect(() => {
     const loadTheme = async () => {
+      setIsLoading(true);
+      
       if (user) {
+        // ✅ Logged in: ALWAYS fetch from database first
         const { data, error } = await supabase
           .from('profiles')
           .select('theme')
           .eq('id', user.id)
           .single();
         
-        // If DB has a valid theme, override the local state
-        if (data && data.theme && VALID_THEMES.includes(data.theme)) {
-          setTheme(data.theme);
+        if (error) {
+          console.error('Error loading theme from DB:', error);
         }
+        
+        // Use DB theme if valid, otherwise fallback to localStorage or default
+        const dbTheme = data?.theme;
+        const localTheme = localStorage.getItem('theme');
+        
+        const finalTheme = (dbTheme && VALID_THEMES.includes(dbTheme)) 
+          ? dbTheme 
+          : (VALID_THEMES.includes(localTheme) ? localTheme : 'paper');
+        
+        setTheme(finalTheme);
+      } else {
+        // ✅ Not logged in: Use localStorage or default
+        const localTheme = localStorage.getItem('theme');
+        const finalTheme = VALID_THEMES.includes(localTheme) ? localTheme : 'paper';
+        setTheme(finalTheme);
       }
+      
+      setIsLoading(false);
     };
+    
     loadTheme();
   }, [user]);
 
-  // 3. Whenever theme changes: update DOM, localStorage, AND database
+  // ✅ Apply theme to DOM whenever it changes
   useEffect(() => {
-    // ✅ Keep your working DOM/localStorage logic exactly as it was
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('theme', theme);
-    
-    // ✅ NEW: Auto-save to database if user is logged in
-    if (user) {
-      supabase
-        .from('profiles')
-        .update({ theme })
-        .eq('id', user.id)
-        .then(({ error }) => {
-          if (error) console.error('Failed to save theme to DB:', error);
-        });
+    if (!isLoading) {
+      document.documentElement.setAttribute('data-theme', theme);
+      localStorage.setItem('theme', theme);
+      
+      // ✅ Auto-save to database if logged in
+      if (user) {
+        supabase
+          .from('profiles')
+          .update({ theme })
+          .eq('id', user.id)
+          .catch(err => console.error('Failed to save theme:', err));
+      }
     }
-  }, [theme, user]);
+  }, [theme, user, isLoading]);
+
+  // Show nothing or a loading state while determining the theme
+  if (isLoading) {
+    return <div style={{ visibility: 'hidden' }}>{children}</div>;
+  }
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
