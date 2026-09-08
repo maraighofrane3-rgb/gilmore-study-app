@@ -38,13 +38,13 @@ const TaskRow = memo(function TaskRow({ task, onToggle, onDelete, onFocus, timeS
         onClick={() => onToggle(task)}
         className="shrink-0 text-coffee-cream hover:text-maple-rust transition-colors"
       >
-        {task.completed ? (
+        {task.status === 'done' ? (
           <CheckCircle size={16} className="text-porch-sage" />
         ) : (
           <Circle size={16} />
         )}
       </button>
-      <span className={`flex-1 font-body text-sm ${task.completed ? 'line-through text-coffee-cream/50' : 'text-library-ink'}`}>
+      <span className={`flex-1 font-body text-sm ${task.status === 'done' ? 'line-through text-coffee-cream/50' : 'text-library-ink'}`}>
         {task.title}
       </span>
       {timeSpent && (
@@ -73,14 +73,14 @@ const TaskRow = memo(function TaskRow({ task, onToggle, onDelete, onFocus, timeS
 // 🧠 MEMOIZED GOAL CARD
 // ============================================
 
-const GoalCard = memo(function GoalCard({ goal, index, tasks, timeSpentByGoalTaskId, formatTimeSpent, onAddTask, onToggleTask, onDeleteTask, onFocusTask, onDeleteGoal }) {
+const GoalCard = memo(function GoalCard({ goal, index, tasks, timeSpentByTaskId, formatTimeSpent, onAddTask, onToggleTask, onDeleteTask, onFocusTask, onDeleteGoal }) {
   const [expanded, setExpanded] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [addingTask, setAddingTask] = useState(false);
 
   const percent = Math.round((goal.current_value / goal.target_value) * 100);
   const goalTasks = tasks.filter(t => t.goal_id === goal.id);
-  const completedTasks = goalTasks.filter(t => t.completed).length;
+  const completedTasks = goalTasks.filter(t => t.status === 'done').length;
   const category = CATEGORIES.find(c => c.id === goal.category) || CATEGORIES[1];
   const CategoryIcon = category.icon;
 
@@ -170,7 +170,7 @@ const GoalCard = memo(function GoalCard({ goal, index, tasks, timeSpentByGoalTas
                   onToggle={onToggleTask}
                   onDelete={onDeleteTask}
                   onFocus={onFocusTask}
-                  timeSpent={timeSpentByGoalTaskId[task.id]}
+                  timeSpent={timeSpentByTaskId[task.id]}
                   formatTimeSpent={formatTimeSpent}
                 />
               ))
@@ -226,7 +226,7 @@ export default function Goals() {
 
   const [goals, setGoals] = useState([]);
   const [tasks, setTasks] = useState([]);
-  const [goalTaskSessions, setGoalTaskSessions] = useState([]); // ✅ NEW
+  const [taskSessions, setTaskSessions] = useState([]); 
   const [isAdding, setIsAdding] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -266,17 +266,17 @@ export default function Goals() {
     setLoading(true);
     const [goalsRes, tasksRes, sessionsRes] = await Promise.all([
       supabase.from('goals').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
-      supabase.from('goal_tasks').select('*').eq('user_id', user.id).order('created_at', { ascending: true }),
+      supabase.from('tasks').select('*').eq('user_id', user.id).order('created_at', { ascending: true }),
       supabase.from('pomodoro_sessions')
-        .select('goal_task_id, duration')
+        .select('task_id, duration')
         .eq('user_id', user.id)
         .eq('completed', true)
-        .not('goal_task_id', 'is', null)
+        .not('task_id', 'is', null)
     ]);
 
     if (!goalsRes.error) setGoals(goalsRes.data || []);
     if (!tasksRes.error) setTasks(tasksRes.data || []);
-    if (!sessionsRes.error) setGoalTaskSessions(sessionsRes.data || []);
+    if (!sessionsRes.error) setTaskSessions(sessionsRes.data || []);
     setLoading(false);
   }, [user]);
 
@@ -294,7 +294,7 @@ export default function Goals() {
 
   const stats = useMemo(() => {
     const totalTasks = tasks.length;
-    const completedTasks = tasks.filter(t => t.completed).length;
+    const completedTasks = tasks.filter(t => t.status === 'done').length;
     const activeGoals = goals.filter(g => g.status === 'active').length;
     const completedGoals = goals.filter(g => g.status === 'completed').length;
     return {
@@ -318,14 +318,14 @@ export default function Goals() {
     });
   }, [goals, searchQuery, activeCategory, activeStatus]);
 
-  // ⏱️ Temps total passé par goal_task_id
-  const timeSpentByGoalTaskId = useMemo(() => {
+  // ⏱️ Temps total passé par task_id
+  const timeSpentByTaskId = useMemo(() => {
     const totals = {};
-    goalTaskSessions.forEach(s => {
-      if (s.goal_task_id) totals[s.goal_task_id] = (totals[s.goal_task_id] || 0) + (s.duration || 0);
+    taskSessions.forEach(s => {
+      if (s.task_id) totals[s.task_id] = (totals[s.task_id] || 0) + (s.duration || 0);
     });
     return totals;
-  }, [goalTaskSessions]);
+  }, [taskSessions]);
 
   const formatTimeSpent = useCallback((minutes) => {
     if (!minutes || minutes < 1) return null;
@@ -393,7 +393,7 @@ export default function Goals() {
       }
     } else if (target.type === 'task') {
       setTasks(prev => prev.filter(t => t.id !== target.data.id));
-      const { error } = await supabase.from('goal_tasks').delete().eq('id', target.data.id);
+      const { error } = await supabase.from('tasks').delete().eq('id', target.data.id);
       if (error) {
         fetchGoals();
         showNotification('Failed to delete task.', 'error');
@@ -410,12 +410,13 @@ export default function Goals() {
   const handleAddTask = useCallback(async (goalId, title) => {
     try {
       const { data, error } = await supabase
-        .from('goal_tasks')
+        .from('tasks')
         .insert([{
           goal_id: goalId,
           user_id: user.id,
           title,
-          completed: false
+          status: 'todo',
+          category: 'Goals'
         }])
         .select()
         .single();
@@ -429,40 +430,43 @@ export default function Goals() {
   }, [user, showNotification]);
 
   const handleToggleTask = useCallback(async (task) => {
-    const newCompleted = !task.completed;
+    const newStatus = task.status === 'done' ? 'todo' : 'done';
 
-    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: newCompleted } : t));
+    // Optimistic update
+    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
 
     try {
       const { error } = await supabase
-        .from('goal_tasks')
-        .update({ completed: newCompleted })
+        .from('tasks')
+        .update({ status: newStatus })
         .eq('id', task.id);
 
       if (error) throw error;
 
+      // Recalculate goal progress
       const goalTasks = tasks.filter(t => t.goal_id === task.goal_id);
       const goal = goals.find(g => g.id === task.goal_id);
       if (goal) {
         const completedCount = goalTasks.filter(t =>
-          t.id === task.id ? newCompleted : t.completed
+          t.id === task.id ? newStatus === 'done' : t.status === 'done'
         ).length;
         const totalTasks = goalTasks.length;
 
-        const newValue = Math.round((completedCount / totalTasks) * goal.target_value);
-        const newStatus = newValue >= goal.target_value ? 'completed' : 'active';
+        const newValue = totalTasks > 0 ? Math.round((completedCount / totalTasks) * goal.target_value) : 0;
+        const newStatusGoal = newValue >= goal.target_value ? 'completed' : 'active';
 
         await supabase
           .from('goals')
-          .update({ current_value: newValue, status: newStatus })
+          .update({ current_value: newValue, status: newStatusGoal })
           .eq('id', task.goal_id);
 
         setGoals(prev => prev.map(g =>
-          g.id === task.goal_id ? { ...g, current_value: newValue, status: newStatus } : g
+          g.id === task.goal_id ? { ...g, current_value: newValue, status: newStatusGoal } : g
         ));
       }
     } catch (err) {
-      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: task.completed } : t));
+      // Rollback on error
+      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: task.status } : t));
       showNotification('Failed to update task.', 'error');
     }
   }, [tasks, goals, showNotification]);
@@ -706,7 +710,7 @@ export default function Goals() {
               goal={goal}
               index={i}
               tasks={tasks}
-              timeSpentByGoalTaskId={timeSpentByGoalTaskId}
+              timeSpentByTaskId={timeSpentByTaskId}
               formatTimeSpent={formatTimeSpent}
               onAddTask={handleAddTask}
               onToggleTask={handleToggleTask}
