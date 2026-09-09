@@ -34,6 +34,7 @@ export default function Layout() {
     { to: '/weekly-report', icon: BarChart3, label: 'Weekly Report' }, 
     { to: '/settings', icon: Settings, label: 'Settings' },
     { to: '/profile', icon: User, label: 'Profile' },
+    { to: '/history', icon: BarChart3, label: 'History' },
   ];
 
   return (
