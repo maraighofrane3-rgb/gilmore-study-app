@@ -20,7 +20,7 @@ export default function Layout() {
   const location = useLocation();
 
   const navItems = [
-    { to: '/dashboard', icon: Home, label: 'Dashboard' },
+    { to: '/dashboard', icon: Home, label: 'Welcome' },
     { to: '/library', icon: BookOpen, label: 'Library' },
     { to: '/study-materials', icon: GraduationCap, label: 'Study Materials' },
     { to: '/tasks', icon: CheckCircle, label: 'Tasks' },
