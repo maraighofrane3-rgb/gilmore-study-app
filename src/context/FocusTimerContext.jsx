@@ -28,11 +28,17 @@ export function FocusTimerProvider({ children }) {
     }
     return (stored?.durationMin || 25) * 60;
   });
+  
   const [selectedTaskId, setSelectedTaskId] = useState(stored?.selectedTaskId ?? null);
   const [selectedGoalId, setSelectedGoalId] = useState(stored?.selectedGoalId ?? null);
   const [selectedGoalTaskId, setSelectedGoalTaskId] = useState(stored?.selectedGoalTaskId ?? null);
+  
+  // ✅ ADDED: Material and Book states
+  const [selectedMaterialId, setSelectedMaterialId] = useState(stored?.selectedMaterialId ?? null);
+  const [selectedBookId, setSelectedBookId] = useState(stored?.selectedBookId ?? null);
+
   const [sessionKind, setSessionKind] = useState(stored?.sessionKind || 'focus');
-  const [phase, setPhase] = useState(stored?.phase || 'focus'); // ✅ lives here now
+  const [phase, setPhase] = useState(stored?.phase || 'focus');
   const [coffeeEmpty, setCoffeeEmpty] = useState(false);
   const [completedAt, setCompletedAt] = useState(null);
   const [saveError, setSaveError] = useState(null);
@@ -76,9 +82,13 @@ export function FocusTimerProvider({ children }) {
         task_id: selectedTaskId || null,
         goal_id: selectedGoalId || null,
         goal_task_id: selectedGoalTaskId || null,
+        // ✅ ADDED: Save material and book to the session
+        material_id: selectedMaterialId || null,
+        book_id: selectedBookId || null,
         duration: minutes,
         completed: true,
       }]);
+      
       if (error) {
         console.error('Failed to record session:', error);
         setSaveError(error.message || 'Could not save your session.');
@@ -88,7 +98,6 @@ export function FocusTimerProvider({ children }) {
     }
     setCompletedAt(new Date().toISOString());
 
-    // ✅ focus → coffee break · break → empty coffee → candle
     if (sessionKind === 'focus') {
       goBreak();
     } else {
@@ -96,6 +105,7 @@ export function FocusTimerProvider({ children }) {
       breakBackTimer.current = setTimeout(goFocus, 2600);
     }
   };
+  
   const recordRef = useRef(recordSession);
   recordRef.current = recordSession;
 
@@ -133,9 +143,11 @@ export function FocusTimerProvider({ children }) {
         durationMin, timeLeft, isRunning, endAt, sessionKind, phase,
         lastFocusMin: lastFocusMin.current,
         selectedTaskId, selectedGoalId, selectedGoalTaskId,
+        // ✅ ADDED: Persist material and book
+        selectedMaterialId, selectedBookId,
       }));
     } catch {}
-  }, [durationMin, timeLeft, isRunning, endAt, sessionKind, phase, selectedTaskId, selectedGoalId, selectedGoalTaskId]);
+  }, [durationMin, timeLeft, isRunning, endAt, sessionKind, phase, selectedTaskId, selectedGoalId, selectedGoalTaskId, selectedMaterialId, selectedBookId]);
 
   // ---------- tab title ----------
   useEffect(() => {
@@ -157,7 +169,7 @@ export function FocusTimerProvider({ children }) {
   const pause = () => { setIsRunning(false); setEndAt(null); };
   const reset = () => { setIsRunning(false); setEndAt(null); setTimeLeft(durationMin * 60); };
   const changeDuration = (min) => {
-    if (sessionKind === 'focus') lastFocusMin.current = min; // remember focus length
+    if (sessionKind === 'focus') lastFocusMin.current = min;
     setDurationMin(min);
     setIsRunning(false);
     setEndAt(null);
@@ -175,8 +187,11 @@ export function FocusTimerProvider({ children }) {
     <FocusTimerContext.Provider value={{
       durationMin, timeLeft, isRunning, phase, coffeeEmpty,
       selectedTaskId, selectedGoalId, selectedGoalTaskId,
+      // ✅ ADDED: Expose new states and setters
+      selectedMaterialId, selectedBookId,
       completedAt, saveError, sessionKind,
       setSelectedTaskId, setSelectedGoalId, setSelectedGoalTaskId, setSessionKind,
+      setSelectedMaterialId, setSelectedBookId,
       start, pause, reset, changeDuration, done, skipBreak,
     }}>
       {children}

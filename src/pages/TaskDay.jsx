@@ -52,10 +52,13 @@ export default function TaskDay() {
     fetchDay();
   }, [user, date]);
 
+  // ✅ Calculate time spent per task ID
   const timeSpentByTaskId = useMemo(() => {
     const totals = {};
     sessions.forEach(s => {
-      if (s.task_id) totals[s.task_id] = (totals[s.task_id] || 0) + (s.duration || 0);
+      if (s.task_id) {
+        totals[s.task_id] = (totals[s.task_id] || 0) + (s.duration || 0);
+      }
     });
     return totals;
   }, [sessions]);
@@ -231,52 +234,65 @@ export default function TaskDay() {
         </div>
       ) : (
         <div className="space-y-2">
-          {sortedTasks.map((t) => (
-            <div key={t.id} className="cozy-card p-4 flex items-start sm:items-center gap-3 group">
-              <button onClick={() => toggleTask(t)} className={t.status === 'done' ? 'text-porch-sage' : 'text-coffee-cream hover:text-porch-sage transition-colors'}>
-                {t.status === 'done' ? <CheckCircle size={20} /> : <Circle size={20} />}
-              </button>
-              
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`font-body text-sm ${t.status === 'done' ? 'line-through text-coffee-cream' : 'text-library-ink'}`}>
-                    {t.title}
-                  </span>
-                  
-                  {/* Priority Badge */}
-                  <span className={`shrink-0 px-2 py-0.5 rounded-sm font-label text-[0.6rem] uppercase tracking-wider ${priorityColors[t.priority || 'B']}`}>
-                    {t.priority || 'B'}
-                  </span>
-                  
-                  {/* Category Badge */}
-                  {t.category && t.category !== 'General' && (
-                    <span className="shrink-0 px-2 py-0.5 bg-yale-blue/10 text-yale-blue rounded-sm font-label text-[0.6rem] uppercase tracking-wider">
-                      {t.category}
+          {sortedTasks.map((t) => {
+            const timeSpent = timeSpentByTaskId[t.id] || 0;
+            const hasTime = timeSpent > 0;
+            
+            return (
+              <div key={t.id} className="cozy-card p-4 flex items-start sm:items-center gap-3 group">
+                <button onClick={() => toggleTask(t)} className={t.status === 'done' ? 'text-porch-sage' : 'text-coffee-cream hover:text-porch-sage transition-colors'}>
+                  {t.status === 'done' ? <CheckCircle size={20} /> : <Circle size={20} />}
+                </button>
+                
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`font-body text-sm ${t.status === 'done' ? 'line-through text-coffee-cream' : 'text-library-ink'}`}>
+                      {t.title}
                     </span>
-                  )}
-                  
-                  {/* Linked Goal Badge */}
-                  {t.goal_id && t.goals?.title && (
-                    <span className="shrink-0 flex items-center gap-1 px-2 py-0.5 bg-maple-rust/10 text-maple-rust rounded-sm font-label text-[0.6rem] uppercase tracking-wider">
-                      <Target size={10} />
-                      {t.goals.title}
+                    
+                    {/* Priority Badge */}
+                    <span className={`shrink-0 px-2 py-0.5 rounded-sm font-label text-[0.6rem] uppercase tracking-wider ${priorityColors[t.priority || 'B']}`}>
+                      {t.priority || 'B'}
                     </span>
-                  )}
+                    
+                    {/* Category Badge */}
+                    {t.category && t.category !== 'General' && (
+                      <span className="shrink-0 px-2 py-0.5 bg-yale-blue/10 text-yale-blue rounded-sm font-label text-[0.6rem] uppercase tracking-wider">
+                        {t.category}
+                      </span>
+                    )}
+                    
+                    {/* Linked Goal Badge */}
+                    {t.goal_id && t.goals?.title && (
+                      <span className="shrink-0 flex items-center gap-1 px-2 py-0.5 bg-maple-rust/10 text-maple-rust rounded-sm font-label text-[0.6rem] uppercase tracking-wider">
+                        <Target size={10} />
+                        {t.goals.title}
+                      </span>
+                    )}
+                  </div>
+                  
+                  {/* ✅ Time Spent Badge - Always visible layout */}
+                  <div className="flex items-center gap-1 mt-1.5">
+                    {hasTime ? (
+                      <span className="flex items-center gap-1 px-2 py-0.5 bg-yale-blue/10 text-yale-blue rounded-sm font-label text-[0.65rem] uppercase tracking-wider">
+                        <Timer size={10} />
+                        {formatTimeSpent(timeSpent)} spent
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 px-2 py-0.5 bg-coffee-cream/5 text-coffee-cream/40 rounded-sm font-label text-[0.65rem] uppercase tracking-wider">
+                        <Timer size={10} />
+                        No time tracked
+                      </span>
+                    )}
+                  </div>
                 </div>
                 
-                {timeSpentByTaskId[t.id] && (
-                  <div className="flex items-center gap-1 mt-1.5 text-coffee-cream/60 font-label text-[0.65rem]">
-                    <Timer size={10} />
-                    {formatTimeSpent(timeSpentByTaskId[t.id])} spent
-                  </div>
-                )}
+                <button onClick={() => deleteTask(t.id)} className="text-coffee-cream/40 hover:text-maple-rust opacity-0 group-hover:opacity-100 transition-opacity mt-1 sm:mt-0">
+                  <Trash2 size={16} />
+                </button>
               </div>
-              
-              <button onClick={() => deleteTask(t.id)} className="text-coffee-cream/40 hover:text-maple-rust opacity-0 group-hover:opacity-100 transition-opacity mt-1 sm:mt-0">
-                <Trash2 size={16} />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

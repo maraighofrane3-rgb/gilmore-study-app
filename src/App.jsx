@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { FocusTimerProvider } from './context/FocusTimerContext';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
+import WeeklyReport from './pages/WeeklyReport';
 
 // ⚡ Imports immédiats (auth flow + layout — critiques au démarrage)
 import Login from './pages/Login';
@@ -69,6 +70,7 @@ function App() {
               <Route path="study-materials/:materialId" element={<StudyMaterials />} />
               <Route path="study-materials/:materialId/chapter/:chapterId" element={<ChapterDetail />} />
               <Route path="history" element={<History />} />
+              <Route path="/weekly-report" element={<WeeklyReport />} />
             </Route>
           </Routes>
         </Suspense>

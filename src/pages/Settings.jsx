@@ -10,7 +10,6 @@ const TABS = [
   { id: 'account', label: 'Account', icon: User },
   { id: 'privacy', label: 'Privacy', icon: Lock },
   { id: 'appearance', label: 'Appearance', icon: Palette },
-  { id: 'productivity', label: 'Productivity', icon: Clock },
 ];
 
 const THEMES = [

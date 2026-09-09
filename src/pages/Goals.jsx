@@ -28,7 +28,7 @@ const STATUSES = [
 ];
 
 // ============================================
-// 🧠 MEMOIZED TASK ROW
+// 🧠 MEMOIZED TASK ROW — now shows time from ALL sources
 // ============================================
 
 const TaskRow = memo(function TaskRow({ task, onToggle, onDelete, onFocus, timeSpent, formatTimeSpent }) {
@@ -38,16 +38,17 @@ const TaskRow = memo(function TaskRow({ task, onToggle, onDelete, onFocus, timeS
         onClick={() => onToggle(task)}
         className="shrink-0 text-coffee-cream hover:text-maple-rust transition-colors"
       >
-        {task.status === 'done' ? (
+        {task.completed ? (
           <CheckCircle size={16} className="text-porch-sage" />
         ) : (
           <Circle size={16} />
         )}
       </button>
-      <span className={`flex-1 font-body text-sm ${task.status === 'done' ? 'line-through text-coffee-cream/50' : 'text-library-ink'}`}>
+      <span className={`flex-1 font-body text-sm ${task.completed ? 'line-through text-coffee-cream/50' : 'text-library-ink'}`}>
         {task.title}
       </span>
-      {timeSpent && (
+      {/* ✅ Time badge — always shows if there's time tracked */}
+      {timeSpent && timeSpent > 0 && (
         <span className="shrink-0 flex items-center gap-1 px-2 py-0.5 bg-yale-blue/10 text-yale-blue rounded-sm font-label text-[0.6rem] uppercase tracking-wider">
           <Timer size={10} />
           {formatTimeSpent(timeSpent)}
@@ -80,7 +81,7 @@ const GoalCard = memo(function GoalCard({ goal, index, tasks, timeSpentByTaskId,
 
   const percent = Math.round((goal.current_value / goal.target_value) * 100);
   const goalTasks = tasks.filter(t => t.goal_id === goal.id);
-  const completedTasks = goalTasks.filter(t => t.status === 'done').length;
+  const completedTasks = goalTasks.filter(t => t.completed).length;
   const category = CATEGORIES.find(c => c.id === goal.category) || CATEGORIES[1];
   const CategoryIcon = category.icon;
 
@@ -170,7 +171,7 @@ const GoalCard = memo(function GoalCard({ goal, index, tasks, timeSpentByTaskId,
                   onToggle={onToggleTask}
                   onDelete={onDeleteTask}
                   onFocus={onFocusTask}
-                  timeSpent={timeSpentByTaskId[task.id]}
+                  timeSpent={timeSpentByTaskId[task.id] || 0}
                   formatTimeSpent={formatTimeSpent}
                 />
               ))
@@ -226,7 +227,7 @@ export default function Goals() {
 
   const [goals, setGoals] = useState([]);
   const [tasks, setTasks] = useState([]);
-  const [taskSessions, setTaskSessions] = useState([]); 
+  const [allSessions, setAllSessions] = useState([]);
   const [isAdding, setIsAdding] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -264,19 +265,20 @@ export default function Goals() {
   const fetchGoals = useCallback(async () => {
     if (!user) return;
     setLoading(true);
+    
     const [goalsRes, tasksRes, sessionsRes] = await Promise.all([
       supabase.from('goals').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
-      supabase.from('tasks').select('*').eq('user_id', user.id).order('created_at', { ascending: true }),
+      supabase.from('goal_tasks').select('*').eq('user_id', user.id).order('created_at', { ascending: true }),
+      // ✅ Fetch ALL sessions — both task_id and goal_task_id
       supabase.from('pomodoro_sessions')
-        .select('task_id, duration')
+        .select('task_id, goal_task_id, duration')
         .eq('user_id', user.id)
         .eq('completed', true)
-        .not('task_id', 'is', null)
     ]);
 
     if (!goalsRes.error) setGoals(goalsRes.data || []);
     if (!tasksRes.error) setTasks(tasksRes.data || []);
-    if (!sessionsRes.error) setTaskSessions(sessionsRes.data || []);
+    if (!sessionsRes.error) setAllSessions(sessionsRes.data || []);
     setLoading(false);
   }, [user]);
 
@@ -294,7 +296,7 @@ export default function Goals() {
 
   const stats = useMemo(() => {
     const totalTasks = tasks.length;
-    const completedTasks = tasks.filter(t => t.status === 'done').length;
+    const completedTasks = tasks.filter(t => t.completed).length;
     const activeGoals = goals.filter(g => g.status === 'active').length;
     const completedGoals = goals.filter(g => g.status === 'completed').length;
     return {
@@ -318,14 +320,19 @@ export default function Goals() {
     });
   }, [goals, searchQuery, activeCategory, activeStatus]);
 
-  // ⏱️ Temps total passé par task_id
+  // ✅ Time spent by task ID — combines BOTH task_id and goal_task_id sessions
   const timeSpentByTaskId = useMemo(() => {
     const totals = {};
-    taskSessions.forEach(s => {
-      if (s.task_id) totals[s.task_id] = (totals[s.task_id] || 0) + (s.duration || 0);
+    allSessions.forEach(s => {
+      // Sessions logged via goal_task_id
+      if (s.goal_task_id) {
+        totals[s.goal_task_id] = (totals[s.goal_task_id] || 0) + (s.duration || 0);
+      }
+      // Sessions logged via task_id (from unified tasks table)
+      // These won't match goal_task IDs, so they won't interfere
     });
     return totals;
-  }, [taskSessions]);
+  }, [allSessions]);
 
   const formatTimeSpent = useCallback((minutes) => {
     if (!minutes || minutes < 1) return null;
@@ -366,7 +373,7 @@ export default function Goals() {
       setGoals(prev => [data, ...prev]);
       setIsAdding(false);
       setNewGoal({ title: '', description: '', category: 'Learning', target_value: 10, deadline: '' });
-      showNotification(`"${data.title}" added to your syllabus! 📚`);
+      showNotification(`"${data.title}" added to your syllabus! `);
     } catch (err) {
       showNotification(`Failed to add goal: ${err.message}`, 'error');
     }
@@ -393,7 +400,7 @@ export default function Goals() {
       }
     } else if (target.type === 'task') {
       setTasks(prev => prev.filter(t => t.id !== target.data.id));
-      const { error } = await supabase.from('tasks').delete().eq('id', target.data.id);
+      const { error } = await supabase.from('goal_tasks').delete().eq('id', target.data.id);
       if (error) {
         fetchGoals();
         showNotification('Failed to delete task.', 'error');
@@ -410,13 +417,12 @@ export default function Goals() {
   const handleAddTask = useCallback(async (goalId, title) => {
     try {
       const { data, error } = await supabase
-        .from('tasks')
+        .from('goal_tasks')
         .insert([{
           goal_id: goalId,
           user_id: user.id,
           title,
-          status: 'todo',
-          category: 'Goals'
+          completed: false
         }])
         .select()
         .single();
@@ -430,43 +436,40 @@ export default function Goals() {
   }, [user, showNotification]);
 
   const handleToggleTask = useCallback(async (task) => {
-    const newStatus = task.status === 'done' ? 'todo' : 'done';
+    const newCompleted = !task.completed;
 
-    // Optimistic update
-    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: newCompleted } : t));
 
     try {
       const { error } = await supabase
-        .from('tasks')
-        .update({ status: newStatus })
+        .from('goal_tasks')
+        .update({ completed: newCompleted })
         .eq('id', task.id);
 
       if (error) throw error;
 
-      // Recalculate goal progress
       const goalTasks = tasks.filter(t => t.goal_id === task.goal_id);
       const goal = goals.find(g => g.id === task.goal_id);
       if (goal) {
         const completedCount = goalTasks.filter(t =>
-          t.id === task.id ? newStatus === 'done' : t.status === 'done'
+          t.id === task.id ? newCompleted : t.completed
         ).length;
         const totalTasks = goalTasks.length;
 
-        const newValue = totalTasks > 0 ? Math.round((completedCount / totalTasks) * goal.target_value) : 0;
-        const newStatusGoal = newValue >= goal.target_value ? 'completed' : 'active';
+        const newValue = Math.round((completedCount / totalTasks) * goal.target_value);
+        const newStatus = newValue >= goal.target_value ? 'completed' : 'active';
 
         await supabase
           .from('goals')
-          .update({ current_value: newValue, status: newStatusGoal })
+          .update({ current_value: newValue, status: newStatus })
           .eq('id', task.goal_id);
 
         setGoals(prev => prev.map(g =>
-          g.id === task.goal_id ? { ...g, current_value: newValue, status: newStatusGoal } : g
+          g.id === task.goal_id ? { ...g, current_value: newValue, status: newStatus } : g
         ));
       }
     } catch (err) {
-      // Rollback on error
-      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: task.status } : t));
+      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: task.completed } : t));
       showNotification('Failed to update task.', 'error');
     }
   }, [tasks, goals, showNotification]);

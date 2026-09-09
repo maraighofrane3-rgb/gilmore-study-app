@@ -41,6 +41,18 @@ const EMPTY_FORM = {
 };
 
 // ============================================
+// ⚡ OPTIMIZATION: Debounce Hook
+// ============================================
+function useDebounce(value, delay) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
+}
+
+// ============================================
 // 🧠 MEMOIZED CARD
 // ============================================
 
@@ -68,6 +80,7 @@ const HoleCard = memo(function HoleCard({ hole, index, onOpen, onDelete }) {
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(hole); }}
           className="text-coffee-cream/40 hover:text-maple-rust transition-colors p-1"
+          aria-label="Delete rabbit hole"
         >
           <Trash2 size={14} />
         </button>
@@ -121,6 +134,7 @@ export default function RabbitHoles() {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounce(searchQuery, 300); // ⚡ Debounce search for performance
   const [activeCategory, setActiveCategory] = useState('All');
   const [activeStatus, setActiveStatus] = useState('all');
 
@@ -147,20 +161,24 @@ export default function RabbitHoles() {
   // ============================================
 
   const fetchHoles = useCallback(async () => {
+    if (!user) return;
     setLoading(true);
+    
+    // ⚡ Added .limit(200) to prevent massive payload if user has hundreds of entries
     const { data, error } = await supabase
       .from('rabbit_holes')
       .select('*')
       .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(200);
 
     if (!error) setHoles(data || []);
     setLoading(false);
   }, [user]);
 
   useEffect(() => {
-    if (user) fetchHoles();
-  }, [user, fetchHoles]);
+    fetchHoles();
+  }, [fetchHoles]);
 
   useEffect(() => {
     return () => { if (notifTimer.current) clearTimeout(notifTimer.current); };
@@ -186,8 +204,9 @@ export default function RabbitHoles() {
     return counts;
   }, [holes]);
 
+  // ⚡ Uses debouncedSearch instead of searchQuery to prevent re-rendering on every keystroke
   const filteredHoles = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     return holes.filter(h => {
       const matchesCategory = activeCategory === 'All' || h.category === activeCategory;
       const matchesStatus = activeStatus === 'all' || h.status === activeStatus;
@@ -197,19 +216,20 @@ export default function RabbitHoles() {
         (h.category || '').toLowerCase().includes(q);
       return matchesCategory && matchesStatus && matchesSearch;
     });
-  }, [holes, searchQuery, activeCategory, activeStatus]);
+  }, [holes, debouncedSearch, activeCategory, activeStatus]);
 
   // ============================================
   // 🤖 AI GENERATION
   // ============================================
 
   const handleGenerateWithAI = async () => {
-    if (!aiQuestion.trim()) return;
+    if (!aiQuestion.trim() || !user) return;
 
     setGenerating(true);
     try {
+      // ⚡ Added userId to body so the Edge Function can check the cache
       const { data, error } = await supabase.functions.invoke('generate-rabbit-hole', {
-        body: { question: aiQuestion, category: aiCategory }
+        body: { question: aiQuestion, category: aiCategory, userId: user.id }
       });
 
       if (error) throw error;
@@ -284,7 +304,7 @@ export default function RabbitHoles() {
         showNotification('New rabbit hole created! 🕳️');
       }
       setIsEditing(false);
-      fetchHoles();
+      fetchHoles(); // Refresh list
     } catch (err) {
       showNotification(`Failed to save: ${err.message}`, 'error');
     }
@@ -292,22 +312,32 @@ export default function RabbitHoles() {
 
   const handleDelete = async (hole) => {
     if (!confirm(`Remove "${hole.title}"?`)) return;
+    
+    // ⚡ Optimistic UI update
+    setHoles(prev => prev.filter(h => h.id !== hole.id));
+    if (selectedHole?.id === hole.id) setIsEditing(false);
+    
     const { error } = await supabase.from('rabbit_holes').delete().eq('id', hole.id);
-    if (!error) {
-      setHoles(prev => prev.filter(h => h.id !== hole.id));
-      if (selectedHole?.id === hole.id) setIsEditing(false);
+    if (error) {
+      // Rollback on error
+      fetchHoles();
+      showNotification('Failed to remove rabbit hole.', 'error');
+    } else {
       showNotification('Rabbit hole removed.');
     }
   };
 
   const handleStatusChange = async (hole, newStatus) => {
+    // ⚡ Optimistic UI update
     setHoles(prev => prev.map(h => h.id === hole.id ? { ...h, status: newStatus } : h));
+    
     const { error } = await supabase
       .from('rabbit_holes')
       .update({ status: newStatus })
       .eq('id', hole.id);
 
     if (error) {
+      // Rollback on error
       setHoles(prev => prev.map(h => h.id === hole.id ? { ...h, status: hole.status } : h));
       showNotification('Failed to update status.', 'error');
     } else {

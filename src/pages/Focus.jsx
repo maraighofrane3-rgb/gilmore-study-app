@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useFocusTimer } from '../context/FocusTimerContext';
-import { Target, TrendingUp, BookOpen, ListChecks, Play, Pause, RotateCcw, CheckCircle } from 'lucide-react';
+import { Target, TrendingUp, BookOpen, ListChecks, Play, Pause, RotateCcw, CheckCircle, FileText, Library } from 'lucide-react';
 
 const DURATIONS = [
   { label: '25m', min: 25 },
@@ -132,7 +132,7 @@ function CandleAndCoffee({ phase, coffeeEmpty, progress, isRunning }) {
             <ellipse cx="75" cy="200" rx="32" ry="7" fill="url(#brassGrad)" />
             <rect x="67" y="202" width="16" height="10" rx="3" fill="#7E5D1C" />
             <ellipse cx="75" cy="206" rx="13" ry="3" fill="#E0B45C" opacity=".8" />
-            <ellipse cx="75" cy="214" rx="38" ry="8" fill="url(#brassGrad)" />
+            <ellipse cx="75" cy="214" rx="38" ry="6" fill="url(#brassGrad)" />
             <ellipse cx="75" cy="213" rx="30" ry="5" fill="none" stroke="#5E4515" strokeWidth="1" opacity=".45" />
             <ellipse cx="75" cy="226" rx="48" ry="6" fill="#3B2314" opacity=".08" />
           </svg>
@@ -223,6 +223,9 @@ export default function Focus() {
     selectedTaskId, setSelectedTaskId,
     selectedGoalId, setSelectedGoalId,
     selectedGoalTaskId, setSelectedGoalTaskId,
+    // ✅ MATCHES FocusTimerContext.jsx exactly
+    selectedMaterialId, setSelectedMaterialId,
+    selectedBookId, setSelectedBookId,
     completedAt, done,
     phase, coffeeEmpty, skipBreak,
   } = useFocusTimer();
@@ -230,13 +233,16 @@ export default function Focus() {
   const [tasks, setTasks] = useState([]);
   const [goals, setGoals] = useState([]);
   const [goalTasks, setGoalTasks] = useState([]);
+  const [studyMaterials, setStudyMaterials] = useState([]);
+  const [books, setBooks] = useState([]);
   const [focusMode, setFocusMode] = useState('task');
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [weekMinutes, setWeekMinutes] = useState(0);
   const [weekDays, setWeekDays] = useState([]);
   const [dailyGoal, setDailyGoal] = useState(6);
 
-  const tasksOfSelectedGoal = useMemo(
+    const tasksOfSelectedGoal = useMemo(
+    // ✅ CHANGED: check !t.completed instead of t.status !== 'done'
     () => goalTasks.filter(t => t.goal_id === selectedGoalId && !t.completed),
     [goalTasks, selectedGoalId]
   );
@@ -251,10 +257,14 @@ export default function Focus() {
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
     const mondayISO = monday.toISOString().split('T')[0];
 
-    const [tasksRes, goalsRes, goalTasksRes, todayRes, weekRes, profileRes] = await Promise.all([
+        const [tasksRes, goalsRes, goalTasksRes, materialsRes, booksRes, todayRes, weekRes, profileRes] = await Promise.all([
       supabase.from('tasks').select('id, title').eq('user_id', user.id).eq('status', 'todo'),
       supabase.from('goals').select('id, title').eq('user_id', user.id).eq('status', 'active'),
+      // ✅ CHANGED: 'status' to 'completed'
       supabase.from('goal_tasks').select('id, title, goal_id, completed').eq('user_id', user.id).order('created_at', { ascending: true }),
+      supabase.from('materials').select('id, title').eq('user_id', user.id),
+// ✅ Removed .eq('status', 'reading') so it shows ALL books
+      supabase.from('books').select('id, title').eq('user_id', user.id),
       supabase.from('pomodoro_sessions').select('duration').eq('user_id', user.id).eq('completed', true).gte('created_at', `${today}T00:00:00`),
       supabase.from('pomodoro_sessions').select('duration, created_at').eq('user_id', user.id).eq('completed', true).gte('created_at', `${mondayISO}T00:00:00`),
       supabase.from('profiles').select('daily_goal_hours').eq('id', user.id).maybeSingle(),
@@ -263,6 +273,8 @@ export default function Focus() {
     setTasks(tasksRes.data || []);
     setGoals(goalsRes.data || []);
     setGoalTasks(goalTasksRes.data || []);
+    setStudyMaterials(materialsRes.data || []);
+    setBooks(booksRes.data || []);
     setTodayMinutes((todayRes.data || []).reduce((s, r) => s + (r.duration || 0), 0));
     setWeekMinutes((weekRes.data || []).reduce((s, r) => s + (r.duration || 0), 0));
     if (profileRes.data?.daily_goal_hours) setDailyGoal(profileRes.data.daily_goal_hours);
@@ -295,12 +307,34 @@ export default function Focus() {
     setFocusMode('task');
     setSelectedGoalId(null);
     setSelectedGoalTaskId(null);
+    setSelectedMaterialId(null); // ✅
+    setSelectedBookId(null);
   };
+  
   const switchToGoal = () => {
     setFocusMode('goal');
     setSelectedTaskId(null);
     setSelectedGoalTaskId(null);
+    setSelectedMaterialId(null); // ✅
+    setSelectedBookId(null);
   };
+
+  const switchToStudyMaterial = () => {
+    setFocusMode('study-material');
+    setSelectedTaskId(null);
+    setSelectedGoalId(null);
+    setSelectedGoalTaskId(null);
+    setSelectedBookId(null);
+  };
+
+  const switchToBook = () => {
+    setFocusMode('book');
+    setSelectedTaskId(null);
+    setSelectedGoalId(null);
+    setSelectedGoalTaskId(null);
+    setSelectedMaterialId(null); // ✅
+  };
+
   const handleGoalSelect = (goalId) => {
     setSelectedGoalId(goalId || null);
     setSelectedTaskId(null);
@@ -346,10 +380,11 @@ export default function Focus() {
       {/* Focus target — only during focus phase */}
       {phase === 'focus' && (
         <div className="max-w-xl mx-auto space-y-3">
-          <div className="flex gap-2">
+          {/* Mode Switcher */}
+          <div className="grid grid-cols-2 gap-2">
             <button
               onClick={switchToTask}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-sm font-label text-xs uppercase tracking-wider border transition-colors ${
+              className={`flex items-center justify-center gap-2 py-2 rounded-sm font-label text-xs uppercase tracking-wider border transition-colors ${
                 focusMode === 'task'
                   ? 'bg-yale-blue text-page-cream border-yale-blue'
                   : 'border-coffee-cream/30 text-coffee-cream hover:border-maple-rust hover:text-maple-rust'
@@ -359,7 +394,7 @@ export default function Focus() {
             </button>
             <button
               onClick={switchToGoal}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-sm font-label text-xs uppercase tracking-wider border transition-colors ${
+              className={`flex items-center justify-center gap-2 py-2 rounded-sm font-label text-xs uppercase tracking-wider border transition-colors ${
                 focusMode === 'goal'
                   ? 'bg-yale-blue text-page-cream border-yale-blue'
                   : 'border-coffee-cream/30 text-coffee-cream hover:border-maple-rust hover:text-maple-rust'
@@ -367,8 +402,29 @@ export default function Focus() {
             >
               <Target size={14} /> Goal
             </button>
+            <button
+              onClick={switchToStudyMaterial}
+              className={`flex items-center justify-center gap-2 py-2 rounded-sm font-label text-xs uppercase tracking-wider border transition-colors ${
+                focusMode === 'study-material'
+                  ? 'bg-yale-blue text-page-cream border-yale-blue'
+                  : 'border-coffee-cream/30 text-coffee-cream hover:border-maple-rust hover:text-maple-rust'
+              }`}
+            >
+              <FileText size={14} /> Study Material
+            </button>
+            <button
+              onClick={switchToBook}
+              className={`flex items-center justify-center gap-2 py-2 rounded-sm font-label text-xs uppercase tracking-wider border transition-colors ${
+                focusMode === 'book'
+                  ? 'bg-yale-blue text-page-cream border-yale-blue'
+                  : 'border-coffee-cream/30 text-coffee-cream hover:border-maple-rust hover:text-maple-rust'
+              }`}
+            >
+              <Library size={14} /> Book
+            </button>
           </div>
 
+          {/* Task Selection */}
           {focusMode === 'task' && (
             <div className="flex items-center gap-2 bg-page-cream border border-coffee-cream/20 rounded-sm px-4 py-3">
               <BookOpen size={18} className="text-coffee-cream shrink-0" />
@@ -385,6 +441,7 @@ export default function Focus() {
             </div>
           )}
 
+          {/* Goal Selection */}
           {focusMode === 'goal' && (
             <div className="space-y-3 animate-fade-in-up">
               <div className="flex items-center gap-2 bg-page-cream border border-coffee-cream/20 rounded-sm px-4 py-3">
@@ -446,6 +503,40 @@ export default function Focus() {
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Material Selection */}
+          {focusMode === 'study-material' && (
+            <div className="flex items-center gap-2 bg-page-cream border border-coffee-cream/20 rounded-sm px-4 py-3">
+              <FileText size={18} className="text-coffee-cream shrink-0" />
+              <select
+                value={selectedMaterialId || ''} // ✅ MATCHES Context
+                onChange={(e) => setSelectedMaterialId(e.target.value || null)} // ✅ MATCHES Context
+                className="flex-1 bg-transparent focus:outline-none font-body text-sm text-library-ink"
+              >
+                <option value="">Select a material (optional)...</option>
+                {studyMaterials.map((sm) => (
+                  <option key={sm.id} value={sm.id}>{sm.title}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Book Selection */}
+          {focusMode === 'book' && (
+            <div className="flex items-center gap-2 bg-page-cream border border-coffee-cream/20 rounded-sm px-4 py-3">
+              <Library size={18} className="text-coffee-cream shrink-0" />
+              <select
+                value={selectedBookId || ''}
+                onChange={(e) => setSelectedBookId(e.target.value || null)}
+                className="flex-1 bg-transparent focus:outline-none font-body text-sm text-library-ink"
+              >
+                <option value="">Select a book (optional)...</option>
+                {books.map((b) => (
+                  <option key={b.id} value={b.id}>{b.title}</option>
+                ))}
+              </select>
             </div>
           )}
         </div>

@@ -30,8 +30,9 @@ export default function Layout() {
     { to: '/projects', icon: FlaskConical, label: 'The Lab' },
     { to: '/goals', icon: Target, label: 'Goals' },
     { to: '/achievements', icon: Trophy, label: 'Achievements' },
+    // ✅ Added Weekly Report here
+    { to: '/weekly-report', icon: BarChart3, label: 'Weekly Report' }, 
     { to: '/settings', icon: Settings, label: 'Settings' },
-    { to: '/history', label: 'History', icon: BarChart3 },
     { to: '/profile', icon: User, label: 'Profile' },
   ];
 
