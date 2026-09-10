@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import {
   BookOpen,
@@ -13,11 +14,19 @@ import {
   Trophy,
   GraduationCap,
   BarChart3,
+  History as HistoryIcon,
+  Map, // utilisé pour le bouton Guide
 } from 'lucide-react';
 import AutumnLeaves from './AutumnLeaves';
+import OnboardingTour from './OnboardingTour';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 
 export default function Layout() {
   const location = useLocation();
+  const { user } = useAuth(); // ✅ Récupération de l'utilisateur
+
+  const [showTour, setShowTour] = useState(false);
 
   const navItems = [
     { to: '/dashboard', icon: Home, label: 'Welcome' },
@@ -30,12 +39,30 @@ export default function Layout() {
     { to: '/projects', icon: FlaskConical, label: 'The Lab' },
     { to: '/goals', icon: Target, label: 'Goals' },
     { to: '/achievements', icon: Trophy, label: 'Achievements' },
-    // ✅ Added Weekly Report here
-    { to: '/weekly-report', icon: BarChart3, label: 'Weekly Report' }, 
+    { to: '/weekly-report', icon: BarChart3, label: 'Weekly Report' },
+    { to: '/history', icon: HistoryIcon, label: 'History' }, // ✅ icône distincte
     { to: '/settings', icon: Settings, label: 'Settings' },
     { to: '/profile', icon: User, label: 'Profile' },
-    { to: '/history', icon: BarChart3, label: 'History' },
   ];
+
+  // ✅ Vérifie si le tour doit s'afficher (première visite)
+  useEffect(() => {
+    const checkTour = async () => {
+      if (!user) return;
+
+      const { data } = await supabase
+        .from('profiles')
+        .select('onboarding_completed')
+        .eq('id', user.id)
+        .single();
+
+      if (data && data.onboarding_completed === false) {
+        setShowTour(true);
+      }
+    };
+
+    checkTour();
+  }, [user]);
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-page-cream">
@@ -47,7 +74,9 @@ export default function Layout() {
           <h1 className="font-display text-3xl font-bold leading-tight text-sidebar-accent">
             Rory Gilmore's <span className="italic text-sidebar-text">World</span>
           </h1>
-          <p className="font-label text-xs uppercase tracking-wider-label text-sidebar-muted mt-3">Stars Hollow, Connecticut</p>
+          <p className="font-label text-xs uppercase tracking-wider-label text-sidebar-muted mt-3">
+            Stars Hollow, Connecticut
+          </p>
           <div className="mt-6 h-px w-16 bg-sidebar-accent/50" />
         </div>
 
@@ -66,9 +95,13 @@ export default function Layout() {
                       : 'text-sidebar-text/70 hover:bg-sidebar-text/5 hover:text-sidebar-text border-transparent hover:border-sidebar-accent/60'
                   }`}
                 >
-                  <div className={`relative transition-all duration-300 ${
-                    isActive ? 'scale-110' : 'group-hover:scale-110 group-hover:-translate-x-1'
-                  }`}>
+                  <div
+                    className={`relative transition-all duration-300 ${
+                      isActive
+                        ? 'scale-110'
+                        : 'group-hover:scale-110 group-hover:-translate-x-1'
+                    }`}
+                  >
                     <Icon size={20} />
                     {isActive && (
                       <span className="absolute -right-1 -top-1 flex h-2 w-2">
@@ -86,16 +119,33 @@ export default function Layout() {
           })}
         </ul>
 
-        {/* Bas de sidebar — ancré via mt-auto, ne peut plus chevaucher la liste */}
-        <div className="hidden md:block shrink-0 p-6">
+        {/* ✅ Bas de sidebar : Guide + Luke's Diner */}
+        <div className="hidden md:block shrink-0 p-6 space-y-3">
+          {/* Bouton "Guide" pour rejouer le tour */}
+          <button
+            onClick={() => setShowTour(true)}
+            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-sm border border-sidebar-accent/30 bg-sidebar-accent/5 hover:bg-sidebar-accent/15 transition-colors text-left"
+            title="Replay the guided tour"
+          >
+            <Map size={16} className="text-sidebar-accent shrink-0" />
+            <span className="font-label text-xs uppercase tracking-wider-label text-sidebar-text/80">
+              Replay Guide
+            </span>
+          </button>
+
+          {/* Carte Luke's Diner */}
           <div className="bg-sidebar-text/5 rounded-sm p-4 border border-sidebar-text/10">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 bg-sidebar-accent/20 rounded-full flex items-center justify-center shrink-0">
                 <span className="text-sidebar-accent text-lg">☕</span>
               </div>
               <div>
-                <p className="font-label text-[0.6rem] uppercase tracking-wider-label text-sidebar-muted">Luke's Diner</p>
-                <p className="font-body text-xs text-sidebar-text/70 italic">"Coffee's on. The rest can wait."</p>
+                <p className="font-label text-[0.6rem] uppercase tracking-wider-label text-sidebar-muted">
+                  Luke's Diner
+                </p>
+                <p className="font-body text-xs text-sidebar-text/70 italic">
+                  "Coffee's on. The rest can wait."
+                </p>
               </div>
             </div>
           </div>
@@ -106,6 +156,9 @@ export default function Layout() {
       <main className="relative z-10 flex-1 md:ml-72 p-6 md:p-12 pb-24 md:pb-12 max-w-7xl mx-auto w-full">
         <Outlet />
       </main>
+
+      {/* ✅ Le tour s'affiche par-dessus tout quand showTour est vrai */}
+      {showTour && <OnboardingTour onClose={() => setShowTour(false)} />}
     </div>
   );
 }
