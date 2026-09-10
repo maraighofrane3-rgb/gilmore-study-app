@@ -61,9 +61,9 @@ const CHAPTERS = [
 
   {
     icon: Home,
-    title: 'Dashboard — Your Main Desk',
+    title: 'Welcome — Your First Stop',
     intro:
-      'The Dashboard is the first page you see. It gives you a quick view of your study life: mentor message, tasks, goals, progress, focus stats and quick actions.',
+      'The Welcome page is the first thing you see when you open the app. It gives you a quick overview of what the app is for and how to use it.',
     sections: [
       {
         heading: 'What you see here',
@@ -246,7 +246,7 @@ const CHAPTERS = [
           'Add chapters inside each material.',
           'Upload or extract text from PDFs.',
           'Open a chapter to study it with AI tools.',
-          'Resume your latest chapter from the Dashboard.',
+          'Resume your latest chapter from the Welcome.',
         ],
       },
       {
@@ -512,7 +512,7 @@ const CHAPTERS = [
       {
         heading: 'Best habit',
         items: [
-          'Use the Dashboard first whenever you open the app.',
+          'Use the Welcome first whenever you open the app.',
           'Let Tasks guide your day.',
           'Let Goals guide your month.',
           'Let the Notebook preserve what you learned.',
