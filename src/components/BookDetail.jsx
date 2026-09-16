@@ -5,7 +5,7 @@ import {
   ArrowLeft, FileText, Lightbulb, Quote, BookOpen, Trash2, Upload, Loader2,
   Sparkles, X, Save, CheckCircle, Image as ImageIcon
 } from 'lucide-react';
-import { extractTextFromPDF, extractCoverFromPDF } from '../utils/pdfWorker';
+import { extractTextFromPDF, renderPDFAsImages, renderPagesBase64, extractCoverFromPDF } from '../utils/pdfWorker';
 
 export default function BookDetail({ book, onBack }) {
   const { user } = useAuth();
@@ -43,11 +43,11 @@ export default function BookDetail({ book, onBack }) {
 
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
-  // ✅ NEW: Global request queue and cooldown to prevent rate limiting
+  // ✅ Global request queue and cooldown to prevent rate limiting
   const requestQueue = useRef([]);
   const isProcessing = useRef(false);
   const lastRequestTime = useRef(0);
-  const MIN_REQUEST_INTERVAL_MS = 10000; // 5 seconds between ANY two Groq calls
+  const MIN_REQUEST_INTERVAL_MS = 10000; 
 
   useEffect(() => {
     if (currentBook) fetchNotes();
@@ -81,7 +81,47 @@ export default function BookDetail({ book, onBack }) {
 
     setUploadingPDF(true);
     try {
-      const extractedText = await extractTextFromPDF(file);
+      let extractedText = '';
+      try {
+        extractedText = await extractTextFromPDF(file);
+      } catch (textErr) {
+        console.warn('⚠️ Standard extraction failed (scanned PDF?):', textErr.message);
+        extractedText = '';
+      }
+
+      const cidCount = (extractedText.match(/\(cid:\d+\)/g) || []).length;
+      const arabicCount = (extractedText.match(/[\u0600-\u06FF\uFB50-\uFDFF\uFE70-\uFEFF]/g) || []).length;
+      const isGarbage =
+        extractedText.trim().length < 100 ||
+        cidCount > 20 ||
+        /[\uFFFD?]{6,}/.test(extractedText.substring(0, 300));
+
+      console.log('🔎 Text layer check:', { len: extractedText.length, cidCount, arabicCount, isGarbage });
+
+      if (isGarbage) {
+        showNotification('Weak text layer — reading pages with Vision AI…');
+        try {
+          const pages = await renderPagesBase64(file, 3, 1.2); 
+          console.log('📷 Rendered pages for vision:', pages.length);
+
+          const { data: vision, error: vErr } = await supabase.functions.invoke('extract-text-vision', {
+            body: { images: pages },
+          });
+
+          if (!vErr && vision?.text) {
+            extractedText = vision.text;
+            console.log('✅ Vision transcription length:', vision.text.length);
+            showNotification('Vision AI read the pages successfully!');
+          } else {
+            console.error('❌ Vision function error:', vErr?.message || vErr);
+            showNotification('Vision AI could not read the pages (check that extract-text-vision is deployed).', 'error');
+          }
+        } catch (visionErr) {
+          console.error('❌ Vision extraction exception:', visionErr);
+          showNotification(`Vision AI failed: ${visionErr.message}`, 'error');
+        }
+      }
+
       const fileExt = file.name.split('.').pop();
       const fileName = `${user.id}/books/${Date.now()}.${fileExt}`;
 
@@ -104,11 +144,8 @@ export default function BookDetail({ book, onBack }) {
           const { error: coverErr } = await supabase.storage
             .from('pdf-documents')
             .upload(coverPath, coverBlob, { contentType: 'image/jpeg', cacheControl: '3600', upsert: false });
-
           if (!coverErr) {
-            updates.cover_url = supabase.storage
-              .from('pdf-documents')
-              .getPublicUrl(coverPath).data.publicUrl;
+            updates.cover_url = supabase.storage.from('pdf-documents').getPublicUrl(coverPath).data.publicUrl;
           }
         } catch (coverErr) {
           console.warn('Auto-cover failed (non-blocking):', coverErr);
@@ -133,7 +170,6 @@ export default function BookDetail({ book, onBack }) {
     e.target.value = '';
   };
 
-  // 🗑️ Remove the uploaded PDF
   const handleDeletePDF = async () => {
     if (!currentBook.file_path) return;
     if (!window.confirm("Are you sure you want to remove the PDF? The Librarian will no longer be able to read this book, but the book itself will remain in your library.")) return;
@@ -173,7 +209,6 @@ export default function BookDetail({ book, onBack }) {
     }
   };
 
-  // 🖼️ Upload / change the book cover
   const handleCoverUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || !file.type.startsWith('image/')) return;
@@ -202,7 +237,6 @@ export default function BookDetail({ book, onBack }) {
     e.target.value = '';
   };
 
-  // 📖 Save reading progress
   const updateProgress = async (page, total) => {
     const totalPages = total !== undefined && total !== ''
       ? (parseInt(total, 10) || null)
@@ -241,7 +275,6 @@ export default function BookDetail({ book, onBack }) {
     showNotification('Book completed! 🎉');
   };
 
-  // 💭 Save personal reflection
   const savePersonalReflection = async () => {
     setSavingReflection(true);
     const { error } = await supabase
@@ -259,7 +292,6 @@ export default function BookDetail({ book, onBack }) {
     showNotification('Reflection saved!');
   };
 
-  // 📄 Extract text between page X and page Y
   const getPageRangeText = (from, to) => {
     const content = currentBook.ai_text_content || '';
     if (!content) return '';
@@ -279,13 +311,11 @@ export default function BookDetail({ book, onBack }) {
     return result.trim();
   };
 
-  // ✅ Generate cache key
   const generateCacheKey = (action, from, to, text) => {
     const source = usePdfText ? `pages-${from}-${to}` : text.substring(0, 100);
     return `${currentBook.id}_${action}_${source}`;
   };
 
-  // ✅ Check cache
   const checkCache = (action, from, to, text) => {
     const cacheKey = generateCacheKey(action, from, to, text);
     const fieldName = action === 'summarize' ? 'ai_summary' : action === 'explain' ? 'ai_explanation' : 'ai_quotes';
@@ -294,7 +324,6 @@ export default function BookDetail({ book, onBack }) {
     return cached ? cached[fieldName] : null;
   };
 
-  // ✅ Auto-save to cache
   const saveToCache = async (action, from, to, text, aiResult) => {
     const cacheKey = generateCacheKey(action, from, to, text);
     const noteData = {
@@ -313,45 +342,40 @@ export default function BookDetail({ book, onBack }) {
     }
   };
 
- // ✅ Retry wrapper with exponential backoff
-const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
-  let delay = 15000; // Start with 15 second delay
-  
-  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-    const { data, error } = await supabase.functions.invoke(functionName, { body });
+  const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
+    let delay = 15000; 
     
-    if (error && error.message && error.message.includes('429')) {
-      if (attempt <= maxRetries) {
-        setRetryMessage(`Groq is busy. Waiting ${Math.round(delay / 1000)}s before retry...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        delay *= 1.5; // Slower exponential backoff
-        continue;
-      } else {
-        // Final failure - give up and show friendly message
-        return { 
-          data: null, 
-          error: new Error('The librarian is overwhelmed. Please wait 60 seconds and try again.') 
-        };
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+      const { data, error } = await supabase.functions.invoke(functionName, { body });
+      
+      if (error && error.message && error.message.includes('429')) {
+        if (attempt <= maxRetries) {
+          setRetryMessage(`The librarian is busy. Waiting ${Math.round(delay / 1000)}s before retry...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 1.5; 
+          continue;
+        } else {
+          return { 
+            data: null, 
+            error: new Error('The librarian is overwhelmed. Please wait 60 seconds and try again.') 
+          };
+        }
       }
+      
+      setRetryMessage('');
+      return { data, error };
     }
     
-    setRetryMessage('');
-    return { data, error };
-  }
-  
-  return { data: null, error: new Error('Max retries exceeded') };
-};
+    return { data: null, error: new Error('Max retries exceeded') };
+  };
 
-  // ✅ Process the request queue, always respecting the global cooldown
   const processQueue = async () => {
     if (isProcessing.current || requestQueue.current.length === 0) return;
-
     isProcessing.current = true;
-
+    
     while (requestQueue.current.length > 0) {
-      const { action, resolve } = requestQueue.current.shift();
+      const { action, resolve, reject } = requestQueue.current.shift();
 
-      // Wait out whatever's left of the cooldown since the last Groq call
       const elapsed = Date.now() - lastRequestTime.current;
       if (elapsed < MIN_REQUEST_INTERVAL_MS && lastRequestTime.current > 0) {
         const waitTime = MIN_REQUEST_INTERVAL_MS - elapsed;
@@ -364,34 +388,41 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
         const result = await executeAnalysis(action);
         resolve(result);
       } catch (error) {
-        resolve({ error });
+        reject(error); 
       } finally {
-        // Update the timestamp after the request completes (success or failure)
         lastRequestTime.current = Date.now();
       }
     }
-
+    
     isProcessing.current = false;
   };
 
-  // 🤖 Analyze with queue system and PRE-QUEUE cache check
   const handleAnalyze = (action) => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const f = Math.max(1, parseInt(fromPage, 10) || 1);
       const t = Math.max(f, parseInt(toPage, 10) || f);
       const sourceText = usePdfText
         ? getPageRangeText(f, t)
         : (inputText.trim() || (currentBook.ai_text_content || ''));
 
-      // ✅ PRE-QUEUE CACHE CHECK: If cached, resolve immediately without touching the queue or cooldown
+      const canReadPdf = usePdfText && !!currentBook.pdf_url;
+
+      if ((!sourceText || !sourceText.trim()) && !canReadPdf) {
+        const errorMsg = usePdfText
+          ? 'No text found in that page range. Check the page numbers.'
+          : 'Paste an excerpt or upload the book PDF first.';
+        showNotification(errorMsg, 'error');
+        reject(new Error(errorMsg)); 
+        return;
+      }
+
       const cachedResult = checkCache(action, f, t, sourceText);
       if (cachedResult) {
         resolve({ result: cachedResult, cacheHit: true });
         return;
       }
 
-      // Not cached? Add to queue and process.
-      requestQueue.current.push({ action, resolve });
+      requestQueue.current.push({ action, resolve, reject });
       processQueue();
     });
   };
@@ -406,7 +437,9 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
       ? getPageRangeText(f, t)
       : (inputText.trim() || (currentBook.ai_text_content || ''));
 
-    if (!sourceText) {
+    const canReadPdf = usePdfText && !!currentBook.pdf_url;
+
+    if (!sourceText && !canReadPdf) {
       throw new Error(usePdfText
         ? 'No text found in that page range. Check the page numbers.'
         : 'Paste an excerpt or upload the book PDF first.');
@@ -425,19 +458,30 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
     }
 
     const { data, error } = await invokeWithRetry('summarize-text', {
-      text: sourceText.substring(0, charLimit),
+      text: (sourceText || '').substring(0, charLimit),
       action,
-      custom_prompt: systemPrompt
+      custom_prompt: systemPrompt,
+      pdf_url: usePdfText ? (currentBook.pdf_url || null) : null,   
     });
 
-    if (error) throw new Error(error.message || 'Failed to analyze');
-    
-    await saveToCache(action, f, t, sourceText, data.result);
-    
-    return { result: data.result, cacheHit: false };
-  };
+    if (error) {
+      let details = error.message || 'Failed to analyze';
+      try {
+        if (error.context) {
+          const body = await error.context.json();
+          if (body?.error) details = body.error;
+        }
+      } catch { /* keep default message */ }
+      throw new Error(details);
+    }
 
-  // ✅ Updated button handlers that use the queue
+    if (!data?.result) throw new Error('The Librarian returned an empty response.');
+
+    await saveToCache(action, f, t, sourceText || '', data.result);
+
+    return { result: data.result, cacheHit: false };
+  }; // ✅ FIXED: Added the missing closing brace that was breaking the file!
+
   const handleSummarize = async () => {
     setAnalyzing(true);
     setActiveAction('summarize');
@@ -501,7 +545,6 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
     setRetryMessage('');
   };
 
-  // 💾 Save AI result as note
   const handleSaveNote = async () => {
     if (!result || !activeAction) return;
 
@@ -568,7 +611,6 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 animate-fade-in-up">
-      {/* 🔔 Notification */}
       {notification.show && (
         <div className={`fixed top-6 right-6 z-50 px-6 py-4 rounded-sm shadow-cozy border animate-fade-in-up flex items-center gap-3 ${
           notification.type === 'error' ? 'bg-maple-rust text-page-cream border-maple-rust' : 'bg-porch-sage text-page-cream border-porch-sage'
@@ -578,7 +620,6 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
         </div>
       )}
 
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <button onClick={onBack} className="p-2 rounded-sm hover:bg-coffee-cream/10 transition-colors">
@@ -632,7 +673,6 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
         </div>
       </div>
 
-      {/* 📖 Reading Progress Tracker */}
       <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
         <div className="flex items-center justify-between gap-4">
           <h3 className="font-display text-lg text-yale-blue flex items-center gap-2">
@@ -712,7 +752,6 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
         </form>
       </div>
 
-      {/* 💭 Personal Reflection */}
       <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
         <div className="flex items-center justify-between gap-4">
           <h3 className="font-display text-lg text-yale-blue flex items-center gap-2">
@@ -771,7 +810,6 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
         )}
       </div>
 
-      {/* 🤖 The Librarian */}
       <div className="bg-page-cream p-6 rounded-sm border-l-4 border-gilmore-gold shadow-cozy space-y-4">
         <div className="flex items-center gap-2">
           <Sparkles size={18} className="text-gilmore-gold" />
@@ -787,7 +825,7 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
           <button
             type="button"
             onClick={() => {
-              if (!currentBook.ai_text_content) {
+              if (!currentBook.ai_text_content && !currentBook.pdf_url) {
                 showNotification('Upload the book PDF first.', 'error');
                 return;
               }
@@ -906,7 +944,6 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
         )}
       </div>
 
-      {/* 📖 PDF Reader */}
       {currentBook.pdf_url && (
         <div className="bg-parchment p-4 rounded-sm border border-coffee-cream/20 shadow-cozy">
           <div className="w-full h-[700px] rounded-sm overflow-hidden border border-coffee-cream/20 bg-white">
@@ -915,7 +952,6 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
         </div>
       )}
 
-      {/* Category Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-coffee-cream/20 pb-2">
         {categories.map(cat => {
           const Icon = cat.icon;
@@ -940,7 +976,6 @@ const invokeWithRetry = async (functionName, body, maxRetries = 2) => {
         })}
       </div>
 
-      {/* Notes Display */}
       {loading ? (
         <p className="text-center text-coffee-cream italic py-10 font-body">Loading notes...</p>
       ) : filteredNotes.length === 0 ? (

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useParams, Link } from 'react-router-dom';
-import { extractTextFromPDF, renderPDFAsImages } from '../utils/pdfWorker';
+import { extractTextFromPDF, renderPDFAsImages, renderPagesBase64 } from '../utils/pdfWorker';
 import {
   ArrowLeft, Loader2, Sparkles, FileText, Lightbulb, List, X,
   Save, CheckCircle, ChevronDown, Upload, FileText as FileIcon,
@@ -182,13 +182,50 @@ export default function ChapterDetail() {
     setLoading(false);
   };
 
+  // 📕 Upload the chapter's PDF (with Vision Rescue for Arabic/scanned PDFs)
   const handlePDFUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || file.type !== 'application/pdf') return;
 
     setUploadingPDF(true);
     try {
-      const extractedText = await extractTextFromPDF(file);
+      // 1. Standard extraction — never let it kill the flow (scanned PDFs throw here)
+      let extractedText = '';
+      try {
+        extractedText = await extractTextFromPDF(file);
+      } catch (textErr) {
+        console.warn('⚠️ Standard extraction failed (scanned PDF?):', textErr.message);
+        extractedText = '';
+      }
+
+      // 2. 🚨 VISION RESCUE TRIGGER
+      const cidCount = (extractedText.match(/\(cid:\d+\)/g) || []).length;
+      const isGarbage =
+        extractedText.trim().length < 100 ||
+        cidCount > 20 ||
+        /[\uFFFD?]{6,}/.test(extractedText.substring(0, 300));
+
+      if (isGarbage) {
+        showNotification('Weak text layer — reading pages with Vision AI…');
+        try {
+          const pages = await renderPagesBase64(file, 3, 1.2);
+          const { data: vision, error: vErr } = await supabase.functions.invoke('extract-text-vision', {
+            body: { images: pages },
+          });
+          if (!vErr && vision?.text) {
+            extractedText = vision.text;
+            showNotification('Vision AI read the pages successfully!');
+          } else {
+            console.error('❌ Vision function error:', vErr?.message || vErr);
+            showNotification('Vision AI could not read the pages.', 'error');
+          }
+        } catch (visionErr) {
+          console.error('❌ Vision extraction exception:', visionErr);
+          showNotification(`Vision AI failed: ${visionErr.message}`, 'error');
+        }
+      }
+
+      // 3. Render images for the UI display
       const htmlContent = await renderPDFAsImages(file);
 
       const divider = `\n\n<div class="pdf-divider" style="text-align: center; margin: 2rem 0; color: #8b5e3c; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; border-top: 1px solid #d4c5b5; border-bottom: 1px solid #d4c5b5; padding: 1rem 0;">📄 ${file.name} · added on ${new Date().toLocaleDateString()}</div>\n\n`;
@@ -199,23 +236,37 @@ export default function ChapterDetail() {
         ? chapter.content + divider + htmlContent
         : (chapter.content ? `<div style="white-space: pre-wrap;">${chapter.content}</div>` + divider : '') + htmlContent;
 
+      // 4. Upload PDF to Storage
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${user.id}/chapters/${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('pdf-documents')
+        .upload(fileName, file, { cacheControl: '3600', upsert: false });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('pdf-documents')
+        .getPublicUrl(fileName);
+
+      const updates = {
+        content: newContent,
+        ai_text_content: (chapter.ai_text_content ? chapter.ai_text_content + '\n\n' : '') + extractedText,
+        is_from_pdf: true,
+        pdf_url: publicUrl,
+        file_path: fileName,
+      };
+
       const { error } = await supabase
         .from('chapters')
-        .update({
-          content: newContent,
-          ai_text_content: (chapter.ai_text_content ? chapter.ai_text_content + '\n\n' : '') + extractedText,
-          is_from_pdf: true
-        })
+        .update(updates)
         .eq('id', chapterId);
 
       if (error) throw error;
-      setChapter({
-        ...chapter,
-        content: newContent,
-        ai_text_content: (chapter.ai_text_content ? chapter.ai_text_content + '\n\n' : '') + extractedText,
-        is_from_pdf: true
-      });
-      showNotification(`PDF added! Text extracted for AI.`);
+
+      setChapter({ ...chapter, ...updates });
+      showNotification('PDF added! Text extracted for AI.');
     } catch (err) {
       console.error('PDF upload error:', err);
       showNotification(`Failed to process PDF: ${err.message}`, 'error');
@@ -261,14 +312,14 @@ export default function ChapterDetail() {
   // ✅ Check cache before calling AI
   const checkCache = (action, from, to) => {
     const cacheKey = generateCacheKey(action, from, to);
-    const fieldName = action === 'summarize' ? 'ai_summary' : 
-                      action === 'explain' ? 'ai_explanation' : 
+    const fieldName = action === 'summarize' ? 'ai_summary' :
+                      action === 'explain' ? 'ai_explanation' :
                       action === 'keypoints' ? 'ai_key_points' : 'ai_summary';
-    
-    const cached = savedNotes.find(note => 
+
+    const cached = savedNotes.find(note =>
       note.original_text === cacheKey && note[fieldName]
     );
-    
+
     return cached ? cached[fieldName] : null;
   };
 
@@ -281,7 +332,7 @@ export default function ChapterDetail() {
       title: `Cache: ${action} ${from}-${to}`,
       original_text: cacheKey,
     };
-    
+
     if (action === 'summarize') noteData.ai_summary = aiResult;
     else if (action === 'explain') noteData.ai_explanation = aiResult;
     else if (action === 'keypoints') noteData.ai_key_points = aiResult.split('\n').filter(line => line.trim());
@@ -297,30 +348,50 @@ export default function ChapterDetail() {
   // ✅ Retry wrapper for Supabase Edge Functions
   const invokeWithRetry = async (functionName, body, maxRetries = 3, setRetryMsg) => {
     let delay = 2500;
-    
+
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
       const { data, error } = await supabase.functions.invoke(functionName, { body });
-      
+
       if (error && error.message && error.message.includes('429')) {
         if (attempt <= maxRetries) {
           if (setRetryMsg) setRetryMsg(`The librarian is catching her breath... retry ${attempt}/${maxRetries} in ${Math.round(delay / 1000)}s`);
           await new Promise(resolve => setTimeout(resolve, delay));
           delay *= 2;
           continue;
+        } else {
+          return {
+            data: null,
+            error: new Error('The librarian is overwhelmed. Please wait 60 seconds and try again.')
+          };
         }
       }
-      
+
       if (setRetryMsg) setRetryMsg('');
       return { data, error };
     }
-    
+
     return { data: null, error: new Error('Max retries exceeded') };
+  };
+
+  // ✅ Extract real error details from Supabase Edge Function responses
+  const extractErrorDetails = async (error, fallback = 'Operation failed') => {
+    let details = error.message || fallback;
+    try {
+      if (error.context) {
+        const errorBody = await error.context.json();
+        details = errorBody.error || errorBody.message || JSON.stringify(errorBody);
+      }
+    } catch {
+      // Keep default error message
+    }
+    return details;
   };
 
   const handleAnalyze = async (action) => {
     const rawText = getReadableText();
+    const canReadPdf = !!chapter?.pdf_url;
 
-    if (!rawText) {
+    if (!rawText && !canReadPdf) {
       showNotification('This chapter has no readable text yet. Click "Add PDF" to extract it.', 'error');
       return;
     }
@@ -338,21 +409,26 @@ export default function ChapterDetail() {
         sourceText = rawText;
         scope = 'this chapter';
       } else if (ranged === '') {
-        showNotification(
-          textBounds
-            ? `Pages ${f}–${t} have no readable text (cover/contents). Readable pages: ${textBounds.first}–${textBounds.last}.`
-            : 'No text found in that page range. Check the page numbers.',
-          'error'
-        );
-        return;
+        if (!canReadPdf) {
+          showNotification(
+            textBounds
+              ? `Pages ${f}–${t} have no readable text (cover/contents). Readable pages: ${textBounds.first}–${textBounds.last}.`
+              : 'No text found in that page range. Check the page numbers.',
+            'error'
+          );
+          return;
+        }
+        // If we have a PDF, we can still analyze via pdf_url fallback
+        sourceText = '';
+        scope = `pages ${f} to ${t}`;
       } else {
         sourceText = ranged;
         scope = `pages ${f} to ${t}`;
       }
     }
 
-    sourceText = sourceText.replace(/\s+/g, ' ').trim();
-    if (!sourceText) {
+    sourceText = (sourceText || '').replace(/\s+/g, ' ').trim();
+    if (!sourceText && !canReadPdf) {
       showNotification('This chapter has no readable text yet. Click "Add PDF" to extract it.', 'error');
       return;
     }
@@ -403,21 +479,14 @@ D) option
       }
 
       const { data, error } = await invokeWithRetry('summarize-text', {
-        text: sourceText.substring(0, charLimit),
+        text: (sourceText || '').substring(0, charLimit),
         action,
-        custom_prompt: systemPrompt
+        custom_prompt: systemPrompt,
+        pdf_url: chapter?.pdf_url || null,   // ✅ PDF-NATIVE RESCUE for Arabic/scanned PDFs
       }, 3, setRetryMessage);
 
       if (error) {
-        let details = error.message || 'Failed to analyze';
-        try {
-          if (error.context) {
-            const errorBody = await error.context.json();
-            details = errorBody.error || errorBody.message || JSON.stringify(errorBody);
-          }
-        } catch {
-          // Keep default error message
-        }
+        const details = await extractErrorDetails(error, 'Failed to analyze');
         throw new Error(details);
       }
 
@@ -427,10 +496,10 @@ D) option
 
       setChapterResult(data.result);
       showNotification(`Analysis of ${scope} complete!`);
-      
+
       // ✅ AUTO-SAVE TO CACHE
       await saveToCache(action, f, t, data.result);
-      
+
     } catch (err) {
       console.error('Analysis error:', err);
       showNotification(`Failed to analyze: ${err.message}`, 'error');
@@ -451,7 +520,9 @@ D) option
 
     try {
       const baseText = getReadableText();
-      if (!baseText) {
+      const canReadPdf = !!chapter?.pdf_url;
+
+      if (!baseText && !canReadPdf) {
         setChatMessages(prev => [...prev, {
           role: 'assistant',
           content: "This chapter only contains scanned page images — there's no readable text yet. Click 'Add PDF' and select the PDF again to extract its text, then ask me anything!"
@@ -470,23 +541,27 @@ D) option
           context = baseText;
           scopeNote = '';
         } else if (ranged === '') {
-          setChatMessages(prev => [...prev, {
-            role: 'assistant',
-            content: textBounds
-              ? `Pages ${chatRangeFrom}–${chatRangeTo} contain no readable text (usually the cover & contents). The readable text runs from page ${textBounds.first} to ${textBounds.last} — try a range inside that!`
-              : "I can't find readable text for that page range. Try different page numbers."
-          }]);
-          setIsAsking(false);
-          return;
+          if (!canReadPdf) {
+            setChatMessages(prev => [...prev, {
+              role: 'assistant',
+              content: textBounds
+                ? `Pages ${chatRangeFrom}–${chatRangeTo} contain no readable text (usually the cover & contents). The readable text runs from page ${textBounds.first} to ${textBounds.last} — try a range inside that!`
+                : "I can't find readable text for that page range. Try different page numbers."
+            }]);
+            setIsAsking(false);
+            return;
+          }
+          context = '';
+          scopeNote = ` (Answer using ONLY pages ${chatRangeFrom} to ${chatRangeTo} of the chapter.)`;
         } else {
           context = ranged;
           scopeNote = ` (Answer using ONLY pages ${chatRangeFrom} to ${chatRangeTo} of the chapter.)`;
         }
       }
 
-      context = context.replace(/\s+/g, ' ').trim();
+      context = (context || '').replace(/\s+/g, ' ').trim();
 
-      if (!context) {
+      if (!context && !canReadPdf) {
         setChatMessages(prev => [...prev, {
           role: 'assistant',
           content: "This chapter has no readable text yet. Click 'Add PDF' and select the PDF again to extract its text, then ask me anything!"
@@ -497,19 +572,12 @@ D) option
 
       const { data, error } = await invokeWithRetry('ask-chapter', {
         question: userQuestion + scopeNote,
-        context: context.substring(0, 8000),
+        context: (context || '').substring(0, 8000),
+        pdf_url: chapter?.pdf_url || null,   // ✅ PDF-NATIVE RESCUE for Q&A too
       }, 3, setChatRetryMessage);
 
       if (error) {
-        let details = error.message || "Sorry, I couldn't process that question.";
-        try {
-          if (error.context) {
-            const errorBody = await error.context.json();
-            details = errorBody.error || errorBody.message || details;
-          }
-        } catch {
-          // Keep default
-        }
+        const details = await extractErrorDetails(error, "Sorry, I couldn't process that question.");
         throw new Error(details);
       }
 
@@ -766,16 +834,16 @@ D) option
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => handleAnalyze('summarize')} disabled={analyzing || !getReadableText()} className="flex items-center gap-2 bg-yale-blue text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
+          <button onClick={() => handleAnalyze('summarize')} disabled={analyzing || (!getReadableText() && !chapter?.pdf_url)} className="flex items-center gap-2 bg-yale-blue text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
             {analyzing && activeAction === 'summarize' ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />} Summarize
           </button>
-          <button onClick={() => handleAnalyze('explain')} disabled={analyzing || !getReadableText()} className="flex items-center gap-2 bg-porch-sage text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
+          <button onClick={() => handleAnalyze('explain')} disabled={analyzing || (!getReadableText() && !chapter?.pdf_url)} className="flex items-center gap-2 bg-porch-sage text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all disabled:opacity-50">
             {analyzing && activeAction === 'explain' ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />} Explain Simply
           </button>
-          <button onClick={() => handleAnalyze('keypoints')} disabled={analyzing || !getReadableText()} className="flex items-center gap-2 bg-gilmore-gold text-yale-blue px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust hover:text-page-cream transition-all disabled:opacity-50">
+          <button onClick={() => handleAnalyze('keypoints')} disabled={analyzing || (!getReadableText() && !chapter?.pdf_url)} className="flex items-center gap-2 bg-gilmore-gold text-yale-blue px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust hover:text-page-cream transition-all disabled:opacity-50">
             {analyzing && activeAction === 'keypoints' ? <Loader2 size={14} className="animate-spin" /> : <List size={14} />} Key Points
           </button>
-          <button onClick={() => handleAnalyze('quiz')} disabled={analyzing || !getReadableText()} className="flex items-center gap-2 bg-maple-rust text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50">
+          <button onClick={() => handleAnalyze('quiz')} disabled={analyzing || (!getReadableText() && !chapter?.pdf_url)} className="flex items-center gap-2 bg-maple-rust text-page-cream px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50">
             {analyzing && activeAction === 'quiz' ? <Loader2 size={14} className="animate-spin" /> : <HelpCircle size={14} />} Quiz (QCM)
           </button>
         </div>

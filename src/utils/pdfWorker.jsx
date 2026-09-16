@@ -18,7 +18,7 @@ function loadPdfjs() {
 
 export const extractTextFromPDF = async (file) => {
   try {
-    const pdfjsLib = await loadPdfjs(); // ✅ THE missing line
+    const pdfjsLib = await loadPdfjs();
     console.log('Starting PDF extraction for:', file.name);
 
     if (file.size > 50 * 1024 * 1024) {
@@ -30,7 +30,6 @@ export const extractTextFromPDF = async (file) => {
     let fullContent = '';
 
     console.log(`PDF loaded, pages: ${pdf.numPages}`);
-
     const maxPages = Math.min(pdf.numPages, 100);
 
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
@@ -64,7 +63,7 @@ export const extractTextFromPDF = async (file) => {
 // ✅ Render PDF pages as images (preserves images, diagrams & formatting)
 export const renderPDFAsImages = async (file) => {
   try {
-    const pdfjsLib = await loadPdfjs(); // ✅ THE missing line
+    const pdfjsLib = await loadPdfjs();
     console.log('Starting PDF rendering for:', file.name);
 
     if (file.size > 50 * 1024 * 1024) {
@@ -77,12 +76,10 @@ export const renderPDFAsImages = async (file) => {
     console.log(`PDF loaded, pages: ${pdf.numPages}`);
 
     let htmlContent = '<div class="pdf-pages">';
-
     const maxPages = Math.min(pdf.numPages, 50);
 
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
       console.log(`Rendering page ${pageNum} of ${maxPages}`);
-
       const page = await pdf.getPage(pageNum);
 
       const scale = 1.5;
@@ -117,7 +114,6 @@ export const renderPDFAsImages = async (file) => {
     }
 
     htmlContent += '</div>';
-
     return htmlContent;
   } catch (error) {
     console.error('PDF rendering error:', error);
@@ -127,7 +123,7 @@ export const renderPDFAsImages = async (file) => {
 
 // 📕 Render the FIRST page of a PDF as a JPEG cover image (returns a Blob)
 export async function extractCoverFromPDF(file, maxWidth = 600) {
-  const pdfjsLib = await loadPdfjs(); // ✅ THE missing line
+  const pdfjsLib = await loadPdfjs();
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const page = await pdf.getPage(1);
@@ -152,4 +148,48 @@ export async function extractCoverFromPDF(file, maxWidth = 600) {
   });
 
   return blob;
+}
+
+// 📷 VISION RESCUE: Render the first N pages as compressed JPEG base64 for Gemini Vision
+export async function renderPagesBase64(file, maxPages = 4, scale = 1.5) {
+  try {
+    const pdfjsLib = await loadPdfjs();
+    console.log('Starting Vision Rescue rendering for:', file.name);
+
+    if (file.size > 50 * 1024 * 1024) {
+      throw new Error(`PDF file is too large. Maximum size is 50MB.`);
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const pages = [];
+    const total = Math.min(pdf.numPages, maxPages);
+
+    for (let i = 1; i <= total; i++) {
+      console.log(`Rendering page ${i} for vision...`);
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      const ctx = canvas.getContext('2d');
+
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      // Convert to base64 JPEG (0.82 quality keeps payload small for Edge Functions)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+      pages.push({
+        pageNum: i,
+        base64: dataUrl.split(',')[1]
+      });
+
+      canvas.remove(); // Clean up memory
+    }
+
+    return pages;
+  } catch (error) {
+    console.error('Vision rendering error:', error);
+    throw error;
+  }
 }

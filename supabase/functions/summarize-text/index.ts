@@ -5,121 +5,130 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// ✅ Ordered by preference. gemini-2.5-flash is EOL Oct 16, 2026 — kept as a
-// fallback for now, but gemini-flash-latest (aliases to gemini-3.5-flash) and
-// the explicit gemini-3.1-flash-lite entry are the long-term-safe picks.
-const GEMINI_MODELS = [
-  "gemini-flash-latest",   // alias — Google repoints this as models rotate
-  "gemini-2.5-flash",      // stable today, shuts down 2026-10-16 — remove after that date
-  "gemini-3.1-flash-lite"  // stable Gemini 3 model, no shutdown date yet
-]
+const API_VERSION = "v1beta"
+const PER_CALL_TIMEOUT_MS = 30000
+const MODELS_CACHE_TTL_MS = 10 * 60 * 1000
+const STATIC_FALLBACK_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"]
 
-const API_VERSIONS = ["v1beta", "v1"]
+let modelsCache: { names: string[]; at: number } | null = null
+
+// 🔍 Ask Google which models this key can use TODAY (no more dead names)
+async function discoverModels(apiKey: string): Promise<string[]> {
+  if (modelsCache && Date.now() - modelsCache.at < MODELS_CACHE_TTL_MS) return modelsCache.names
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/${API_VERSION}/models?key=${apiKey}&pageSize=100`)
+    if (!res.ok) return modelsCache?.names ?? STATIC_FALLBACK_MODELS
+    const data = await res.json()
+    const names: string[] = (data.models || [])
+      .filter((m: any) => (m.supportedGenerationMethods || []).includes("generateContent"))
+      .map((m: any) => (m.name || "").replace("models/", ""))
+      .filter((n: string) => n && !n.includes("embedding") && !n.includes("tts") && !n.includes("image") && !n.includes("aqa"))
+    const flash = names.filter((n) => n.includes("flash") && !n.includes("exp") && !n.includes("preview"))
+    const pro = names.filter((n) => n.includes("pro") && !n.includes("exp") && !n.includes("preview"))
+    const exp = names.filter((n) => !flash.includes(n) && !pro.includes(n))
+    const ordered = [...flash, ...pro, ...exp].slice(0, 3)
+    if (ordered.length) {
+      modelsCache = { names: ordered, at: Date.now() }
+      console.log("Discovered live models:", ordered.join(", "))
+      return ordered
+    }
+  } catch (e: any) {
+    console.warn("Model discovery failed:", e.message)
+  }
+  return modelsCache?.names ?? STATIC_FALLBACK_MODELS
+}
+
+// 🌍 The multilingual rule
+const LANGUAGE_RULE = `
+
+LANGUAGE RULE: Detect the language of the SOURCE TEXT provided below. You MUST write your ENTIRE response in that same language (French source → French response, German source → German response, Arabic source → Arabic response, Spanish source → Spanish response, etc.). Keep every quoted passage verbatim in the original language, and write any interpretation or commentary in that same language too. Only if the language truly cannot be detected, respond in English.`
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
     const { text, action, custom_prompt } = await req.json()
     const apiKey = Deno.env.get('GEMINI_API_KEY')
 
-    if (!apiKey) {
-      console.error('❌ GEMINI_API_KEY is missing!')
-      throw new Error('GEMINI_API_KEY is missing in Supabase Secrets.')
-    }
-
+    if (!apiKey) throw new Error('GEMINI_API_KEY is missing in Supabase Secrets.')
     if (!text || text.trim().length === 0) {
       return new Response(JSON.stringify({ error: 'No text provided.' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
 
-    let systemPrompt = custom_prompt || "Analyze the following text clearly and concisely."
+    let defaultPrompt = "Analyze the following text clearly and concisely."
+    if (!custom_prompt) {
+      if (action === 'summarize') defaultPrompt = "Provide a concise, clear summary of the following text, capturing the main arguments and themes in 2-3 paragraphs."
+      else if (action === 'explain') defaultPrompt = "Explain the following text in simple, clear terms, breaking down any complex jargon so a beginner can understand."
+      else if (action === 'quotes') defaultPrompt = "Extract exactly 3 to 5 of the most beautiful, meaningful or powerful quotes from the following text. Return each quote on its own line, wrapped in quotation marks, followed by a brief one-line interpretation."
+    }
+
+    // ✅ The rule wraps EVERY request, custom_prompt included
+    const systemPrompt = (custom_prompt || defaultPrompt) + LANGUAGE_RULE
     const truncatedText = text.substring(0, 100000)
     const fullPrompt = `${systemPrompt}\n\n---\n\nText to analyze:\n${truncatedText}`
+    const maxOutputTokens = action === 'quotes' || action === 'explain' ? 2000 : 4000
 
-    // ✅ Increased output tokens for complex tasks
-    const maxOutputTokens = action === 'quotes' ? 2000 : action === 'explain' ? 2000 : 4000
-
-    let lastError: any = null
+    const models = await discoverModels(apiKey)
+    const errors: string[] = []
     let finalContent = ''
     let modelUsed = ''
 
-    for (const model of GEMINI_MODELS) {
-      for (const version of API_VERSIONS) {
+    for (const model of models) {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const controller = new AbortController()
+        const t = setTimeout(() => controller.abort(), PER_CALL_TIMEOUT_MS)
         try {
-          console.log(`🔄 Trying ${model} on ${version}...`)
-
-          const url = `https://generativelanguage.googleapis.com/${version}/models/${model}:generateContent?key=${apiKey}`
-
-          // ✅ Timeout to prevent hanging
-          const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
-
-          const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: fullPrompt }] }],
-              generationConfig: {
-                temperature: 0.7,
-                maxOutputTokens: maxOutputTokens
-              }
-            }),
-            signal: controller.signal
-          })
-
-          clearTimeout(timeoutId)
-
-          if (response.ok) {
-            const data = await response.json()
-            const content = data?.candidates?.[0]?.content?.parts?.[0]?.text
-
-            if (content) {
-              finalContent = content
-              modelUsed = `${model} (${version})`
-              console.log(`✅ Success with ${modelUsed}`)
-              break
-            } else {
-              console.warn(`⚠️ ${model} returned empty content`)
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/${API_VERSION}/models/${model}:generateContent?key=${apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: fullPrompt }] }],
+                generationConfig: { temperature: 0.7, maxOutputTokens }
+              }),
+              signal: controller.signal
             }
-          } else {
-            const errText = await response.text()
-            console.warn(`⚠️ ${model} on ${version} failed (${response.status}): ${errText}`)
-            lastError = new Error(`${model} on ${version}: ${response.status}`)
+          )
+          clearTimeout(t)
+
+          if (res.status === 503 || res.status === 429) {
+            errors.push(`${model}->HTTP ${res.status} (attempt ${attempt})`)
+            if (attempt === 1) { await new Promise(r => setTimeout(r, 1000)); continue }
+            break
           }
-        } catch (err: any) {
-          console.error(`❌ Exception with ${model} on ${version}:`, err.message)
-          lastError = err
+          if (!res.ok) {
+            const errText = await res.text()
+            errors.push(`${model}->HTTP ${res.status}`)
+            console.warn(`⚠️ ${model} failed (${res.status}): ${errText.slice(0, 300)}`)
+            break
+          }
+          const data = await res.json()
+          const content = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+          if (content) { finalContent = content; modelUsed = model; break }
+          errors.push(`${model}->empty`)
+          break
+        } catch (e: any) {
+          clearTimeout(t)
+          errors.push(`${model}->${e.name === 'AbortError' ? 'timeout' : e.message}`)
+          break
         }
       }
       if (finalContent) break
     }
 
-    if (!finalContent) {
-      console.error('❌ All models failed. Last error:', lastError?.message)
-      throw lastError || new Error('All Gemini models and endpoints failed.')
-    }
+    if (!finalContent) throw new Error(`All models failed: ${errors.join(' | ')}`)
 
-    return new Response(JSON.stringify({
-      result: finalContent,
-      model_used: modelUsed
-    }), {
+    console.log(`✅ Success with ${modelUsed}`)
+    return new Response(JSON.stringify({ result: finalContent, model_used: modelUsed }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
-
   } catch (err: any) {
-    console.error('❌ Edge Function Critical Error:', err.message)
-    console.error('Stack trace:', err.stack)
-
-    return new Response(JSON.stringify({
-      error: err.message,
-      details: err.stack
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    console.error('❌ summarize-text Critical Error:', err.message)
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
   }
 })
