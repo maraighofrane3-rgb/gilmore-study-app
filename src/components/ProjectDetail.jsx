@@ -145,6 +145,31 @@ function ProjectDetailInner({ project, onBack, onUpdateProject }) {
     return () => { if (notifTimer.current) clearTimeout(notifTimer.current); };
   }, []);
 
+    // 📚 Saved guidance (persistent, from the database)
+  const [savedNotes, setSavedNotes] = useState([]);
+
+  const fetchNotes = useCallback(async () => {
+    if (!project?.id) return;
+    const { data, error } = await supabase
+      .from('project_notes')
+      .select('*')
+      .eq('project_id', project.id)
+      .order('created_at', { ascending: false });
+    if (!error) setSavedNotes(data || []);
+  }, [project?.id]);
+
+  useEffect(() => {
+    fetchNotes();
+  }, [fetchNotes]);
+
+  const deleteNote = useCallback(async (id) => {
+    const { error } = await supabase.from('project_notes').delete().eq('id', id);
+    if (!error) {
+      setSavedNotes(prev => prev.filter(n => n.id !== id));
+      showNotification('Note deleted.');
+    }
+  }, [showNotification]);
+
   // ============================================
   // 🤖 AI GUIDANCE
   // ============================================
@@ -209,7 +234,8 @@ function ProjectDetailInner({ project, onBack, onUpdateProject }) {
         }]);
 
       if (error) throw error;
-      showNotification('Guidance saved to notes! 📝');
+            showNotification('Guidance saved to notes! 📝');
+      fetchNotes();
     } catch (err) {
       console.error('Save error:', err);
       showNotification('Failed to save guidance.', 'error');
@@ -687,6 +713,47 @@ function ProjectDetailInner({ project, onBack, onUpdateProject }) {
             {!guidance && !loadingGuidance && (
               <div className="text-center py-10 text-coffee-cream italic font-body">
                 Ask your AI mentor for step-by-step guidance, tips, or clarification on what to do next.
+              </div>
+            )}
+          </div>
+
+                    {/* 📚 Saved Guidance Shelf (survives reloads) */}
+          <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy">
+            <h2 className="font-display text-lg text-yale-blue mb-4 flex items-center gap-2">
+              <Save size={18} className="text-maple-rust" />
+              Saved Guidance
+            </h2>
+
+            {savedNotes.length === 0 ? (
+              <p className="text-center text-coffee-cream italic font-body text-sm py-6">
+                Nothing saved yet. Click "Save" on any guidance to keep it here forever.
+              </p>
+            ) : (
+              <div className="space-y-4 max-h-[28rem] overflow-y-auto pr-1">
+                {savedNotes.map((note) => (
+                  <div key={note.id} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 animate-fade-in-up">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2 py-0.5 bg-yale-blue/10 text-yale-blue rounded-sm font-label text-[0.6rem] uppercase tracking-wider">
+                          Step {(note.step ?? 0) + 1}
+                        </span>
+                        <span className="font-body text-xs text-coffee-cream/60">
+                          {new Date(note.created_at).toLocaleDateString()} ·{' '}
+                          {new Date(note.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => deleteNote(note.id)}
+                        className="text-coffee-cream/40 hover:text-maple-rust transition-colors shrink-0"
+                        title="Delete note"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    <p className="font-body text-xs text-coffee-cream italic mb-2">Q: {note.question}</p>
+                    <p className="font-body text-sm text-library-ink whitespace-pre-wrap leading-relaxed">{note.content}</p>
+                  </div>
+                ))}
               </div>
             )}
           </div>
