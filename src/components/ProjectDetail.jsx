@@ -4,7 +4,7 @@ import {
   ArrowLeft, CheckCircle, Circle, ChevronRight, ChevronLeft, 
   Sparkles, Loader2, MessageCircle, Send, Target, BookOpen,
   Save, Trash2, Lightbulb, List, AlertTriangle, RotateCcw,
-  Calendar, Clock, X
+  Calendar, Clock, X, Link2, ListChecks
 } from 'lucide-react';
 
 // ============================================
@@ -19,10 +19,98 @@ const QUICK_ACTIONS = [
 ];
 
 // ============================================
-// 🏠 MAIN COMPONENT
+// 🛡️ SHAPE-PROOF NORMALIZERS
 // ============================================
 
-export default function ProjectDetail({ project, onBack, onUpdateProject }) {
+const normMilestone = (m, i) => {
+  if (!m) return { name: `Step ${i + 1}`, description: '', duration: '', tasks: [], success_criteria: [], risks: [] };
+  if (typeof m === 'string') return { name: m, description: '', duration: '', tasks: [], success_criteria: [], risks: [] };
+  if (typeof m !== 'object') return { name: String(m), description: '', duration: '', tasks: [], success_criteria: [], risks: [] };
+  return {
+    name: m.name || m.title || `Step ${i + 1}`,
+    description: m.description || '',
+    duration: m.duration || '',
+    tasks: Array.isArray(m.tasks) ? m.tasks : Array.isArray(m.steps) ? m.steps : [],
+    success_criteria: Array.isArray(m.success_criteria) ? m.success_criteria : Array.isArray(m.criteria) ? m.criteria : [],
+    risks: Array.isArray(m.risks) ? m.risks : [],
+  };
+};
+
+const normResource = (r) => {
+  if (!r) return { name: 'Resource', type: 'resource', description: '', url: '' };
+  if (typeof r === 'string') return { name: r, type: 'resource', description: '', url: r.startsWith('http') ? r : '' };
+  if (typeof r !== 'object') return { name: String(r), type: 'resource', description: '', url: '' };
+  return {
+    name: r.name || 'Resource',
+    type: r.type || 'resource',
+    description: r.description || '',
+    url: r.url || '',
+  };
+};
+
+// 🛡️ CRITICAL: Safe stringify for ANY value that might be an object
+const safeText = (v) => {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (Array.isArray(v)) return v.map(safeText).join(', ');
+  if (typeof v === 'object') {
+    // If it's a milestone-like object, extract the name
+    if (v.name) return v.name;
+    if (v.title) return v.title;
+    // Otherwise stringify it safely
+    try { return JSON.stringify(v); } catch { return ''; }
+  }
+  return String(v);
+};
+
+// ============================================
+// 🏠 ERROR BOUNDARY WRAPPER
+// ============================================
+
+export default function ProjectDetail(props) {
+  if (!props.project) {
+    return (
+      <div className="max-w-4xl mx-auto p-8 text-center animate-fade-in-up">
+        <Loader2 size={32} className="animate-spin mx-auto text-coffee-cream mb-4" />
+        <p className="font-body text-coffee-cream italic">Loading project...</p>
+        <button
+          onClick={props.onBack}
+          className="mt-6 inline-flex items-center gap-2 text-coffee-cream hover:text-maple-rust transition-colors"
+        >
+          <ArrowLeft size={16} /> Back to Lab
+        </button>
+      </div>
+    );
+  }
+
+  try {
+    return <ProjectDetailInner {...props} />;
+  } catch (err) {
+    console.error('ProjectDetail render error:', err);
+    return (
+      <div className="max-w-4xl mx-auto p-6 bg-maple-rust/10 border border-maple-rust rounded-sm animate-fade-in-up">
+        <h2 className="font-display text-xl text-maple-rust mb-2">Render Error</h2>
+        <p className="font-body text-sm text-library-ink mb-4">{err.message}</p>
+        <pre className="bg-parchment p-4 rounded-sm text-xs overflow-auto max-h-64 font-mono text-coffee-cream">
+          {err.stack}
+        </pre>
+        <button
+          onClick={props.onBack}
+          className="mt-4 px-4 py-2 bg-yale-blue text-page-cream rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-colors"
+        >
+          ← Back to Lab
+        </button>
+      </div>
+    );
+  }
+}
+
+// ============================================
+// 🏠 INNER COMPONENT
+// ============================================
+
+function ProjectDetailInner({ project, onBack, onUpdateProject }) {
   const [currentStep, setCurrentStep] = useState(project.current_step || 0);
   const [guidance, setGuidance] = useState('');
   const [guidanceHistory, setGuidanceHistory] = useState([]);
@@ -31,12 +119,16 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }) {
   const [updating, setUpdating] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
 
-  const milestones = project.milestones || [];
-  const resources = project.resources || [];
+  const milestones = Array.isArray(project.milestones)
+    ? project.milestones.map(normMilestone)
+    : [];
+  const resources = Array.isArray(project.resources)
+    ? project.resources.map(normResource)
+    : [];
   const totalSteps = milestones.length;
   const progress = totalSteps > 0 ? (currentStep / totalSteps) * 100 : 0;
+  const currentMilestone = milestones[currentStep] || null;
 
-  // Notifications
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
   const notifTimer = useRef(null);
 
@@ -64,22 +156,25 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }) {
     const userQuestion = customPrompt || question || "What should I focus on for this step?";
 
     try {
-      const { data, error } = await supabase.functions.invoke('get-project-guidance', {
+            const { data, error } = await supabase.functions.invoke('get-project-guidance', {
         body: {
           project_title: project.title,
+          project_objective: project.objective || '',
           current_step: currentStep,
-          milestones: milestones,
-          user_question: userQuestion
+          total_steps: milestones.length,
+          milestones: milestones.map(m => m.name),
+          current_milestone: currentMilestone,   // ✅ tasks + criteria + risks travel with the request
+          user_question: userQuestion,
         }
       });
 
       if (error) throw error;
       
-      setGuidance(data.guidance);
+      setGuidance(data?.guidance || 'No guidance returned.');
       setGuidanceHistory(prev => [{
         id: Date.now(),
         question: userQuestion,
-        answer: data.guidance,
+        answer: data?.guidance || '',
         step: currentStep,
         timestamp: new Date().toISOString()
       }, ...prev]);
@@ -142,7 +237,7 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }) {
 
       if (!error) {
         setCurrentStep(nextStep);
-        onUpdateProject();
+        onUpdateProject?.();
         showNotification(nextStep >= milestones.length 
           ? '🎉 Project completed!' 
           : `Step ${nextStep} completed!`);
@@ -172,7 +267,7 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }) {
 
       if (!error) {
         setCurrentStep(prevStep);
-        onUpdateProject();
+        onUpdateProject?.();
       }
     } catch (err) {
       console.error('Update error:', err);
@@ -208,9 +303,16 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }) {
             <ArrowLeft size={20} className="text-coffee-cream" />
           </button>
           <div className="flex-1">
-            <h1 className="font-display text-3xl text-yale-blue">{project.title}</h1>
-            <p className="font-body text-sm text-coffee-cream italic">{project.objective}</p>
+            <h1 className="font-display text-3xl text-yale-blue">{safeText(project.title) || 'Untitled Project'}</h1>
+            {project.objective && (
+              <p className="font-body text-sm text-coffee-cream italic">{safeText(project.objective)}</p>
+            )}
           </div>
+          {project.total_duration && (
+            <span className="hidden sm:flex items-center gap-1 px-3 py-1.5 bg-yale-blue/10 text-yale-blue rounded-sm font-label text-[0.65rem] uppercase tracking-wider">
+              <Clock size={12} /> {safeText(project.total_duration)}
+            </span>
+          )}
         </div>
 
         {/* Progress Bar */}
@@ -246,6 +348,48 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }) {
         </div>
       </div>
 
+      {/* 📋 Detailed Plan Overview */}
+      {project.total_duration && (
+        <div className="bg-page-cream p-6 rounded-sm border-l-4 border-gilmore-gold shadow-cozy space-y-4">
+          <h2 className="font-display text-lg text-yale-blue flex items-center gap-2">
+            <Target size={18} className="text-gilmore-gold" />
+            The Detailed Plan
+          </h2>
+
+          {Array.isArray(project.key_success_factors) && project.key_success_factors.length > 0 && (
+            <div>
+              <h3 className="font-label text-[0.65rem] uppercase tracking-wider text-porch-sage mb-2 flex items-center gap-1">
+                <Sparkles size={12} /> Keys to Success
+              </h3>
+              <ul className="space-y-1.5">
+                {project.key_success_factors.map((f, i) => (
+                  <li key={i} className="font-body text-xs text-library-ink leading-relaxed flex gap-2">
+                    <Sparkles size={10} className="text-porch-sage mt-1 shrink-0" />
+                    <span>{safeText(f)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {Array.isArray(project.common_pitfalls) && project.common_pitfalls.length > 0 && (
+            <div>
+              <h3 className="font-label text-[0.65rem] uppercase tracking-wider text-maple-rust mb-2 flex items-center gap-1">
+                <AlertTriangle size={12} /> Pitfalls to Avoid
+              </h3>
+              <ul className="space-y-1.5">
+                {project.common_pitfalls.map((p, i) => (
+                  <li key={i} className="font-body text-xs text-library-ink leading-relaxed flex gap-2">
+                    <AlertTriangle size={10} className="text-maple-rust mt-1 shrink-0" />
+                    <span>{safeText(p)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Milestones Timeline */}
         <div className="lg:col-span-1 space-y-4">
@@ -256,7 +400,7 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }) {
             </h2>
             
             <div className="space-y-3">
-              {milestones.map((milestone, idx) => {
+              {milestones.map((ms, idx) => {
                 const isCompleted = idx < currentStep;
                 const isCurrent = idx === currentStep;
                 
@@ -280,14 +424,26 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }) {
                         <Circle size={18} className="text-coffee-cream/30 shrink-0 mt-0.5" />
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream mb-1">
-                          Step {idx + 1}
-                        </p>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream">
+                            Step {idx + 1}
+                          </p>
+                          {ms.duration && (
+                            <span className="font-label text-[0.55rem] uppercase tracking-wider text-coffee-cream/60">
+                              {safeText(ms.duration)}
+                            </span>
+                          )}
+                        </div>
                         <p className={`font-body text-sm ${
                           isCurrent ? 'text-library-ink font-medium' : 'text-coffee-cream'
                         }`}>
-                          {milestone}
+                          {safeText(ms.name)}
                         </p>
+                        {ms.description && (
+                          <p className="font-body text-[0.65rem] text-coffee-cream/70 mt-1 leading-relaxed italic line-clamp-2">
+                            {safeText(ms.description)}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -323,53 +479,134 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }) {
                 <BookOpen size={18} className="text-porch-sage" />
                 Resources
               </h2>
-              <ul className="space-y-2">
-                {resources.map((resource, idx) => {
-                  const isUrl = resource.startsWith('http');
-                  return (
-                    <li key={idx} className="font-body text-sm text-library-ink flex items-start gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-porch-sage shrink-0 mt-1.5" />
-                      {isUrl ? (
-                        <a
-                          href={resource}
-                          target="_blank"
+              <div className="space-y-3">
+                {resources.map((r, idx) => (
+                  <div key={idx} className="bg-page-cream p-3 rounded-sm border border-coffee-cream/20">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className="font-body text-sm font-medium text-library-ink">{safeText(r.name)}</span>
+                      <span className="px-1.5 py-0.5 bg-gilmore-gold/10 text-yale-blue rounded-sm font-label text-[0.5rem] uppercase tracking-wider">
+                        {safeText(r.type)}
+                      </span>
+                      {r.url && (
+                        <a 
+                          href={r.url} 
+                          target="_blank" 
                           rel="noopener noreferrer"
-                          className="text-yale-blue hover:text-maple-rust underline transition-colors break-all"
+                          className="flex items-center gap-1 text-maple-rust hover:underline font-label text-[0.6rem] uppercase tracking-wider"
                         >
-                          {resource}
+                          <Link2 size={10} /> Open
                         </a>
-                      ) : (
-                        <span>{resource}</span>
                       )}
-                    </li>
-                  );
-                })}
-              </ul>
+                    </div>
+                    {r.description && (
+                      <p className="font-body text-[0.7rem] text-coffee-cream leading-relaxed">
+                        {safeText(r.description)}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
 
-        {/* Right: AI Mentor */}
+        {/* Right: AI Mentor + Current Step Breakdown */}
         <div className="lg:col-span-2 space-y-4">
+          
+          {/* 🎯 Current Step Breakdown */}
+          {currentMilestone && (
+            currentMilestone.tasks.length > 0 || 
+            currentMilestone.success_criteria.length > 0 || 
+            currentMilestone.risks.length > 0
+          ) && (
+            <div className="bg-parchment p-6 rounded-sm border border-maple-rust/30 shadow-cozy">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h2 className="font-display text-lg text-maple-rust flex items-center gap-2">
+                  <ListChecks size={18} />
+                  Step {currentStep + 1} Breakdown
+                </h2>
+                {currentMilestone.duration && (
+                  <span className="flex items-center gap-1 px-2 py-1 bg-coffee-cream/10 text-coffee-cream rounded-sm font-label text-[0.6rem] uppercase tracking-wider">
+                    <Clock size={10} /> {safeText(currentMilestone.duration)}
+                  </span>
+                )}
+              </div>
+
+              {currentMilestone.tasks.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="font-label text-[0.65rem] uppercase tracking-wider text-yale-blue mb-2 flex items-center gap-1">
+                    <ListChecks size={12} /> Detailed Steps
+                  </h3>
+                  <ol className="space-y-2">
+                    {currentMilestone.tasks.map((t, i) => (
+                      <li key={i} className="flex gap-2 font-body text-sm text-library-ink leading-relaxed">
+                        <span className="shrink-0 w-5 h-5 rounded-full bg-yale-blue/10 text-yale-blue flex items-center justify-center font-label text-[0.6rem]">
+                          {i + 1}
+                        </span>
+                        <span>{safeText(t)}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              {currentMilestone.success_criteria.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="font-label text-[0.65rem] uppercase tracking-wider text-porch-sage mb-2 flex items-center gap-1">
+                    <CheckCircle size={12} /> Done when…
+                  </h3>
+                  <ul className="space-y-1">
+                    {currentMilestone.success_criteria.map((c, i) => (
+                      <li key={i} className="flex gap-2 font-body text-xs text-library-ink">
+                        <CheckCircle size={12} className="text-porch-sage mt-0.5 shrink-0" />
+                        <span>{safeText(c)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {currentMilestone.risks.length > 0 && (
+                <div>
+                  <h3 className="font-label text-[0.65rem] uppercase tracking-wider text-maple-rust mb-2 flex items-center gap-1">
+                    <AlertTriangle size={12} /> Risks & Mitigations
+                  </h3>
+                  <ul className="space-y-1">
+                    {currentMilestone.risks.map((r, i) => (
+                      <li key={i} className="flex gap-2 font-body text-xs text-coffee-cream">
+                        <AlertTriangle size={12} className="text-maple-rust mt-0.5 shrink-0" />
+                        <span>{safeText(r)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* AI Mentor */}
           <div className="bg-page-cream p-6 rounded-sm border border-coffee-cream/20 shadow-cozy">
             <h2 className="font-display text-lg text-yale-blue mb-4 flex items-center gap-2">
               <Sparkles size={18} className="text-gilmore-gold" />
               AI Mentor
             </h2>
 
-            {/* Current Step Context */}
             <div className="mb-6">
               <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-2">
                 Current Focus: Step {currentStep + 1}
               </label>
               <div className="bg-parchment p-3 rounded-sm border border-coffee-cream/20">
-                <p className="font-body text-sm text-library-ink italic">
-                  {milestones[currentStep] || 'No milestone defined'}
+                <p className="font-body text-sm text-library-ink font-medium">
+                  {currentMilestone?.name ? safeText(currentMilestone.name) : 'No milestone defined'}
                 </p>
+                {currentMilestone?.description && (
+                  <p className="font-body text-xs text-coffee-cream italic mt-1 leading-relaxed">
+                    {safeText(currentMilestone.description)}
+                  </p>
+                )}
               </div>
             </div>
 
-            {/* Quick Actions */}
             <div className="mb-4">
               <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-2">
                 Quick Actions
@@ -392,7 +629,6 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }) {
               </div>
             </div>
 
-            {/* Custom Question */}
             <form onSubmit={(e) => { e.preventDefault(); handleGetGuidance(); }} className="mb-6">
               <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-2">
                 Or ask your own question
@@ -423,7 +659,6 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }) {
               </button>
             </form>
 
-            {/* Current Guidance Display */}
             {guidance && (
               <div className="bg-parchment p-5 rounded-sm border-l-4 border-gilmore-gold animate-fade-in-up space-y-4">
                 <div className="flex justify-between items-start gap-4">
@@ -456,7 +691,6 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }) {
             )}
           </div>
 
-          {/* Guidance History */}
           {guidanceHistory.length > 0 && (
             <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy">
               <h2 className="font-display text-lg text-yale-blue mb-4 flex items-center gap-2">

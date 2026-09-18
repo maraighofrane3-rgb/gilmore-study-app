@@ -21,6 +21,23 @@ const STATUSES = [
 ];
 
 // ============================================
+// 🛡️ SHAPE-PROOF HELPERS
+// Handle both strings AND objects from the AI
+// ============================================
+
+const safeText = (v) => {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (typeof v === 'object') {
+    if (v.name) return v.name;
+    if (v.title) return v.title;
+    try { return JSON.stringify(v); } catch { return ''; }
+  }
+  return String(v);
+};
+
+// ============================================
 // 🧠 MEMOIZED PROJECT CARD
 // ============================================
 
@@ -42,7 +59,7 @@ const ProjectCard = memo(function ProjectCard({ project, index, onOpen, onDelete
       <div className="flex justify-between items-start mb-3">
         <div className={`flex items-center gap-1.5 font-label text-[0.6rem] uppercase tracking-wider ${status.color}`}>
           <StatusIcon size={11} />
-          {project.status.replace('_', ' ')}
+          {safeText(project.status).replace('_', ' ')}
         </div>
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(project); }}
@@ -54,13 +71,13 @@ const ProjectCard = memo(function ProjectCard({ project, index, onOpen, onDelete
 
       {/* Title */}
       <h3 className="font-display text-xl text-yale-blue mb-2 group-hover:text-maple-rust transition-colors line-clamp-2 leading-tight">
-        {project.title}
+        {safeText(project.title)}
       </h3>
 
       {/* Objective */}
       <p className="font-body text-sm text-coffee-cream italic mb-4 line-clamp-2 flex-1">
         <Quote size={10} className="inline mr-1 -mt-1 opacity-40" />
-        {project.objective}
+        {safeText(project.objective)}
       </p>
 
       {/* Progress bar */}
@@ -174,7 +191,7 @@ export default function Projects() {
     return projects.filter(p => {
       const matchesStatus = activeStatus === 'all' || p.status === activeStatus;
       const matchesSearch = q === '' ||
-        p.title.toLowerCase().includes(q) ||
+        (p.title || '').toLowerCase().includes(q) ||
         (p.objective || '').toLowerCase().includes(q);
       return matchesStatus && matchesSearch;
     });
@@ -220,8 +237,8 @@ export default function Projects() {
         .from('projects')
         .insert([{
           user_id: user.id,
-          title: plan.title,
-          objective: plan.objective,
+          title: safeText(plan.title),
+          objective: safeText(plan.objective),
           original_idea: idea,
           milestones: plan.milestones || [],
           resources: plan.resources || [],
@@ -259,7 +276,7 @@ export default function Projects() {
       fetchProjects();
       showNotification('Failed to remove project.', 'error');
     } else {
-      showNotification(`"${project.title}" removed from the lab.`);
+      showNotification(`"${safeText(project.title)}" removed from the lab.`);
     }
   }, [deleteTarget, fetchProjects, showNotification]);
 
@@ -367,9 +384,9 @@ export default function Projects() {
           <div>
             <div className="flex items-center gap-3 mb-2">
               <Sparkles size={20} className="text-gilmore-gold" />
-              <h2 className="font-display text-2xl text-yale-blue">{plan.title}</h2>
+              <h2 className="font-display text-2xl text-yale-blue">{safeText(plan.title)}</h2>
             </div>
-            <p className="font-body text-library-ink italic mb-2">"{plan.objective}"</p>
+            <p className="font-body text-library-ink italic mb-2">"{safeText(plan.objective)}"</p>
             <p className="font-body text-xs text-coffee-cream/70">
               Based on: <span className="italic">"{idea}"</span>
             </p>
@@ -382,12 +399,25 @@ export default function Projects() {
                 <ListChecks size={16} /> Action Milestones
               </h3>
               <ol className="space-y-3">
-                {plan.milestones?.map((milestone, idx) => (
+                {(plan.milestones || []).map((milestone, idx) => (
                   <li key={idx} className="flex items-start gap-3 font-body text-sm text-library-ink">
                     <span className="bg-yale-blue text-page-cream rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 shadow-sm">
                       {idx + 1}
                     </span>
-                    <span>{milestone}</span>
+                    <div className="flex-1">
+                      <p className="font-medium text-library-ink">{safeText(milestone)}</p>
+                      {milestone && typeof milestone === 'object' && milestone.duration && (
+                        <p className="text-xs text-coffee-cream mt-1">
+                          <Clock size={10} className="inline mr-1" />
+                          {safeText(milestone.duration)}
+                        </p>
+                      )}
+                      {milestone && typeof milestone === 'object' && milestone.description && (
+                        <p className="text-xs text-coffee-cream/70 italic mt-1 leading-relaxed">
+                          {safeText(milestone.description)}
+                        </p>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ol>
@@ -399,10 +429,27 @@ export default function Projects() {
                 <BookOpen size={16} /> Required Resources
               </h3>
               <ul className="space-y-3">
-                {plan.resources?.map((resource, idx) => (
+                {(plan.resources || []).map((resource, idx) => (
                   <li key={idx} className="flex items-start gap-3 font-body text-sm text-library-ink">
                     <div className="w-1.5 h-1.5 rounded-full bg-porch-sage shrink-0 mt-1.5" />
-                    <span>{resource}</span>
+                    <div className="flex-1">
+                      <p className="font-medium text-library-ink">{safeText(resource)}</p>
+                      {resource && typeof resource === 'object' && resource.description && (
+                        <p className="text-xs text-coffee-cream/70 italic mt-1 leading-relaxed">
+                          {safeText(resource.description)}
+                        </p>
+                      )}
+                      {resource && typeof resource === 'object' && resource.url && (
+                        <a 
+                          href={resource.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-xs text-maple-rust hover:underline mt-1 inline-block"
+                        >
+                          View resource →
+                        </a>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -518,7 +565,7 @@ export default function Projects() {
         title="Abandon this project?"
         message={
           <>
-            "<span className="italic text-library-ink">{deleteTarget?.title}</span>" will be
+            "<span className="italic text-library-ink">{safeText(deleteTarget?.title)}</span>" will be
             removed from your lab along with all its milestones. This cannot be undone.
           </>
         }
