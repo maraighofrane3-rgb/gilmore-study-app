@@ -1,5 +1,9 @@
 import React from 'react';
 
+// 🕌 Detect right-to-left scripts (Arabic, Hebrew, etc.)
+export const isRTL = (text) =>
+  /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(String(text || ''));
+
 // 🔤 Inline formatting: `code`, **bold**, *italic*
 const inline = (text) => {
   const parts = [];
@@ -26,6 +30,7 @@ const isBlockStart = (t) =>
 
 export default function MarkdownLite({ text, className = '' }) {
   if (!text) return null;
+  const rtl = isRTL(text);
   const lines = String(text).split(/\r?\n/);
   const blocks = [];
   let i = 0, key = 0;
@@ -35,7 +40,7 @@ export default function MarkdownLite({ text, className = '' }) {
 
     if (!trimmed) { i++; continue; }
 
-    // # Headings → visible subtitles
+    // # Headings
     const h = trimmed.match(/^(#{1,4})\s+(.*)$/);
     if (h) {
       const level = h[1].length;
@@ -51,20 +56,24 @@ export default function MarkdownLite({ text, className = '' }) {
       i++; continue;
     }
 
-    // > blockquote
+    // > blockquote (border flips side in RTL)
     if (trimmed.startsWith('> ')) {
       const q = [];
       while (i < lines.length && lines[i].trim().startsWith('> ')) { q.push(lines[i].trim().slice(2)); i++; }
-      blocks.push(<blockquote key={key++} className="my-2 pl-3 border-l-2 border-gilmore-gold italic text-coffee-cream">{q.map((s, idx) => <React.Fragment key={idx}>{idx > 0 && <br />}{inline(s)}</React.Fragment>)}</blockquote>);
+      blocks.push(
+        <blockquote key={key++} className={`my-2 italic text-coffee-cream ${rtl ? 'border-r-2 pr-3' : 'border-l-2 pl-3'} border-gilmore-gold`}>
+          {q.map((s, idx) => <React.Fragment key={idx}>{idx > 0 && <br />}{inline(s)}</React.Fragment>)}
+        </blockquote>
+      );
       continue;
     }
 
-    // - bullet list
+    // - bullet list (indent flips side in RTL)
     if (/^[-*•]\s+/.test(trimmed)) {
       const items = [];
       while (i < lines.length && /^[-*•]\s+/.test(lines[i].trim())) { items.push(lines[i].trim().replace(/^[-*•]\s+/, '')); i++; }
       blocks.push(
-        <ul key={key++} className="my-2 ml-4 space-y-1.5 list-disc marker:text-maple-rust">
+        <ul key={key++} className={`my-2 space-y-1.5 list-disc marker:text-maple-rust ${rtl ? 'mr-4' : 'ml-4'}`}>
           {items.map((it, idx) => <li key={idx} className="leading-relaxed pl-1">{inline(it)}</li>)}
         </ul>
       );
@@ -76,14 +85,14 @@ export default function MarkdownLite({ text, className = '' }) {
       const items = [];
       while (i < lines.length && /^\d+[.)]\s+/.test(lines[i].trim())) { items.push(lines[i].trim().replace(/^\d+[.)]\s+/, '')); i++; }
       blocks.push(
-        <ol key={key++} className="my-2 ml-5 space-y-1.5 list-decimal marker:text-maple-rust marker:font-semibold">
+        <ol key={key++} className={`my-2 space-y-1.5 list-decimal marker:text-maple-rust marker:font-semibold ${rtl ? 'mr-5' : 'ml-5'}`}>
           {items.map((it, idx) => <li key={idx} className="leading-relaxed pl-1">{inline(it)}</li>)}
         </ol>
       );
       continue;
     }
 
-    // paragraph (collect until blank line or next block)
+    // paragraph
     const para = [trimmed];
     i++;
     while (i < lines.length && !isBlockStart(lines[i].trim())) { para.push(lines[i].trim()); i++; }
@@ -94,5 +103,10 @@ export default function MarkdownLite({ text, className = '' }) {
     );
   }
 
-  return <div className={`font-body text-sm text-library-ink ${className}`}>{blocks}</div>;
+  // 🕌 dir="rtl" flips alignment, punctuation order, list markers — everything
+  return (
+    <div dir={rtl ? 'rtl' : 'ltr'} className={`font-body text-sm text-library-ink ${className}`}>
+      {blocks}
+    </div>
+  );
 }
