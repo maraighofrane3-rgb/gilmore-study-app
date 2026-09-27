@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useParams, Link } from 'react-router-dom';
+import MarkdownLite from '../components/MarkdownLite';
 import { extractTextFromPDF, renderPDFAsImages, renderPagesBase64, renderUrlPagesBase64 } from '../utils/pdfWorker';
 import {
   ArrowLeft, Loader2, Sparkles, FileText, Lightbulb, List, X,
@@ -901,7 +902,7 @@ D) option
           <div className="space-y-4 animate-fade-in-up">
             <div className="bg-parchment p-5 rounded-sm border border-coffee-cream/20 relative">
               <button onClick={() => { setChapterResult(''); setActiveAction(null); setNoteTitle(''); setCacheHit(false); }} className="absolute top-2 right-2 text-coffee-cream/50 hover:text-maple-rust transition-colors"><X size={16} /></button>
-              <p className="font-body text-sm text-library-ink whitespace-pre-wrap leading-relaxed pr-6">{chapterResult}</p>
+              <MarkdownLite text={chapterResult} />
             </div>
             <div>
               <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-1">Note title (optional)</label>
@@ -960,15 +961,17 @@ D) option
             <p className="text-center text-coffee-cream italic text-sm py-8">Ask me anything about this chapter's content!</p>
           ) : (
             chatMessages.map((msg, idx) => (
-              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] p-3 rounded-sm text-sm leading-relaxed ${
+                              <div className={`max-w-[85%] p-3 rounded-sm text-sm leading-relaxed ${
                   msg.role === 'user'
                     ? 'bg-yale-blue text-page-cream rounded-br-none'
                     : 'bg-parchment border border-coffee-cream/20 text-library-ink rounded-bl-none'
                 }`}>
-                  {msg.content}
+                  {msg.role === 'user'
+                    ? msg.content
+                    : <MarkdownLite text={msg.content} className="text-[0.85rem]" />}
                 </div>
-              </div>
+      
+              
             ))
           )}
           {isAsking && (
@@ -1081,19 +1084,19 @@ D) option
                         <h5 className="font-label text-xs uppercase tracking-wider text-coffee-cream mb-2 flex items-center gap-1">
                           <StickyNote size={12} /> Your Note
                         </h5>
-                        <p className="font-body text-sm text-library-ink leading-relaxed whitespace-pre-wrap">{note.manual_note}</p>
+                        <MarkdownLite text={note.manual_note} />
                       </div>
                     )}
                     {note.ai_summary && (
                       <div>
                         <h5 className="font-label text-xs uppercase tracking-wider text-coffee-cream mb-2 flex items-center gap-1"><FileText size={12} /> Summary</h5>
-                        <p className="font-body text-sm text-library-ink leading-relaxed whitespace-pre-wrap">{note.ai_summary}</p>
+                        <MarkdownLite text={note.ai_summary} />
                       </div>
                     )}
                     {note.ai_explanation && (
                       <div>
                         <h5 className="font-label text-xs uppercase tracking-wider text-coffee-cream mb-2 flex items-center gap-1"><Lightbulb size={12} /> Simple Explanation</h5>
-                        <p className="font-body text-sm text-library-ink leading-relaxed whitespace-pre-wrap">{note.ai_explanation}</p>
+                        <MarkdownLite text={note.ai_explanation} />
                       </div>
                     )}
                     {note.ai_key_points && note.ai_key_points.length > 0 && (

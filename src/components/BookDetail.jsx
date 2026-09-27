@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import MarkdownLite from '../components/MarkdownLite';
 import {
   ArrowLeft, FileText, Lightbulb, Quote, BookOpen, Trash2, Upload, Loader2,
   Sparkles, X, Save, CheckCircle, Image as ImageIcon
@@ -927,7 +928,7 @@ export default function BookDetail({ book, onBack }) {
               <button onClick={() => { setResult(''); setActiveAction(null); setCacheHit(false); }} className="absolute top-2 right-2 text-coffee-cream/50 hover:text-maple-rust transition-colors">
                 <X size={16} />
               </button>
-              <p className="font-body text-sm text-library-ink whitespace-pre-wrap leading-relaxed pr-6">{result}</p>
+              <div className="pr-6"><MarkdownLite text={result} /></div>
             </div>
             <div className="flex justify-end">
               <button
@@ -1022,18 +1023,17 @@ export default function BookDetail({ book, onBack }) {
                   </div>
                 )}
 
-                <div className={`p-4 rounded-sm ${
+                                <div className={`p-4 rounded-sm ${
                   noteData.type === 'quotes'
                     ? 'bg-gilmore-gold/10 border-l-4 border-gilmore-gold'
                     : noteData.type === 'explanation'
                     ? 'bg-porch-sage/10 border-l-4 border-porch-sage'
                     : 'bg-yale-blue/5 border-l-4 border-yale-blue'
                 }`}>
-                  <p className={`font-body text-sm leading-relaxed whitespace-pre-wrap ${
-                    noteData.type === 'quotes' ? 'italic text-coffee-cream' : 'text-library-ink'
-                  }`}>
-                    {noteData.content}
-                  </p>
+                  <MarkdownLite
+                    text={noteData.content}
+                    className={noteData.type === 'quotes' ? 'italic text-coffee-cream' : 'text-library-ink'}
+                  />
                 </div>
               </div>
             );
