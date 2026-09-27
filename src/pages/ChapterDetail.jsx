@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useParams, Link } from 'react-router-dom';
-import { extractTextFromPDF, renderPDFAsImages, renderPagesBase64 } from '../utils/pdfWorker';
+import { extractTextFromPDF, renderPDFAsImages, renderPagesBase64, renderUrlPagesBase64 } from '../utils/pdfWorker';
 import {
   ArrowLeft, Loader2, Sparkles, FileText, Lightbulb, List, X,
   Save, CheckCircle, ChevronDown, Upload, FileText as FileIcon,
@@ -387,6 +387,24 @@ export default function ChapterDetail() {
     return details;
   };
 
+  // 🛡️ Garbage-text detector (empty, tiny, or cid soup)
+  const isGarbageText = (t) => !t || t.trim().length < 50 || /\(cid:\d+\)/.test(t);
+
+  // 📷 Render just the needed pages from the hosted PDF as JPEG base64
+  const safeRenderPages = async (url, from, to) => {
+    try {
+      showNotification('Reading the pages as images…');
+      return await renderUrlPagesBase64(url, from, to);
+    } catch (e) {
+      console.warn('Page render failed:', e);
+      return null;
+    }
+  };
+
+  // ============================================
+  // 🤖 ANALYZE (Summarize / Explain / KeyPoints / Quiz)
+  // ============================================
+
   const handleAnalyze = async (action) => {
     const rawText = getReadableText();
     const canReadPdf = !!chapter?.pdf_url;
@@ -402,6 +420,7 @@ export default function ChapterDetail() {
 
     let sourceText = rawText;
     let scope = 'this chapter';
+    let pageImages = null; // ✅ declared! (was missing → crash)
 
     if (hasRangeLocal) {
       const ranged = getPageRangeText(f, t);
@@ -409,18 +428,19 @@ export default function ChapterDetail() {
         sourceText = rawText;
         scope = 'this chapter';
       } else if (ranged === '') {
-        if (!canReadPdf) {
+        // Range exists in the PDF but has no extracted text → read those pages as images
+        if (chapter?.pdf_url) {
+          pageImages = await safeRenderPages(chapter.pdf_url, f, t);
+          scope = `pages ${f} to ${t}`;
+        } else {
           showNotification(
             textBounds
-              ? `Pages ${f}–${t} have no readable text (cover/contents). Readable pages: ${textBounds.first}–${textBounds.last}.`
+              ? `Pages ${f}–${t} have no readable text. Readable pages: ${textBounds.first}–${textBounds.last}.`
               : 'No text found in that page range. Check the page numbers.',
             'error'
           );
           return;
         }
-        // If we have a PDF, we can still analyze via pdf_url fallback
-        sourceText = '';
-        scope = `pages ${f} to ${t}`;
       } else {
         sourceText = ranged;
         scope = `pages ${f} to ${t}`;
@@ -428,7 +448,14 @@ export default function ChapterDetail() {
     }
 
     sourceText = (sourceText || '').replace(/\s+/g, ' ').trim();
-    if (!sourceText && !canReadPdf) {
+
+    // 🎯 PAGE-VISION FALLBACK: garbage/empty text + PDF available → send the needed pages as images
+    if (isGarbageText(sourceText) && !pageImages && chapter?.pdf_url) {
+      pageImages = await safeRenderPages(chapter.pdf_url, hasRangeLocal ? f : 1, hasRangeLocal ? t : 4);
+      if (hasRangeLocal) scope = `pages ${f} to ${t}`;
+    }
+
+    if (!sourceText && !pageImages && !canReadPdf) {
       showNotification('This chapter has no readable text yet. Click "Add PDF" to extract it.', 'error');
       return;
     }
@@ -482,7 +509,8 @@ D) option
         text: (sourceText || '').substring(0, charLimit),
         action,
         custom_prompt: systemPrompt,
-        pdf_url: chapter?.pdf_url || null,   // ✅ PDF-NATIVE RESCUE for Arabic/scanned PDFs
+        pdf_url: chapter?.pdf_url || null,
+        page_images: pageImages || undefined, // ✅ PAGE-VISION payload
       }, 3, setRetryMessage);
 
       if (error) {
@@ -507,6 +535,10 @@ D) option
     setAnalyzing(false);
     setRetryMessage('');
   };
+
+  // ============================================
+  // 💬 Q&A CHAT
+  // ============================================
 
   const handleAskQuestion = async (e) => {
     e.preventDefault();
@@ -533,6 +565,7 @@ D) option
 
       let context = baseText;
       let scopeNote = '';
+      let pageImages = null; // ✅ declared!
 
       if (chatHasRange) {
         const ranged = getPageRangeText(chatRangeFrom, chatRangeTo);
@@ -541,7 +574,11 @@ D) option
           context = baseText;
           scopeNote = '';
         } else if (ranged === '') {
-          if (!canReadPdf) {
+          if (chapter?.pdf_url) {
+            // 🎯 Read exactly the asked pages as images
+            pageImages = await safeRenderPages(chapter.pdf_url, chatRangeFrom, chatRangeTo);
+            scopeNote = ` (Answer using ONLY the attached page images ${chatRangeFrom}–${chatRangeTo}.)`;
+          } else {
             setChatMessages(prev => [...prev, {
               role: 'assistant',
               content: textBounds
@@ -551,8 +588,6 @@ D) option
             setIsAsking(false);
             return;
           }
-          context = '';
-          scopeNote = ` (Answer using ONLY pages ${chatRangeFrom} to ${chatRangeTo} of the chapter.)`;
         } else {
           context = ranged;
           scopeNote = ` (Answer using ONLY pages ${chatRangeFrom} to ${chatRangeTo} of the chapter.)`;
@@ -561,7 +596,12 @@ D) option
 
       context = (context || '').replace(/\s+/g, ' ').trim();
 
-      if (!context && !canReadPdf) {
+      // 🎯 PAGE-VISION FALLBACK for whole-chapter questions on garbage text
+      if (isGarbageText(context) && !pageImages && chapter?.pdf_url) {
+        pageImages = await safeRenderPages(chapter.pdf_url, chatHasRange ? chatRangeFrom : 1, chatHasRange ? chatRangeTo : 4);
+      }
+
+      if (!context && !pageImages && !canReadPdf) {
         setChatMessages(prev => [...prev, {
           role: 'assistant',
           content: "This chapter has no readable text yet. Click 'Add PDF' and select the PDF again to extract its text, then ask me anything!"
@@ -573,7 +613,8 @@ D) option
       const { data, error } = await invokeWithRetry('ask-chapter', {
         question: userQuestion + scopeNote,
         context: (context || '').substring(0, 8000),
-        pdf_url: chapter?.pdf_url || null,   // ✅ PDF-NATIVE RESCUE for Q&A too
+        pdf_url: chapter?.pdf_url || null,
+        page_images: pageImages || undefined, // ✅ PAGE-VISION payload
       }, 3, setChatRetryMessage);
 
       if (error) {

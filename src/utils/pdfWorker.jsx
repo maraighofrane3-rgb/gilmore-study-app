@@ -193,3 +193,51 @@ export async function renderPagesBase64(file, maxPages = 4, scale = 1.5) {
     throw error;
   }
 }
+
+// 📷 PAGE-VISION MODE: Render a specific page RANGE from a hosted PDF URL as JPEG base64
+// This solves the 20MB Gemini limit — instead of sending the whole 40MB book,
+// we only send the 6 requested pages as images (~300KB each = ~1.8MB total)
+export async function renderUrlPagesBase64(pdfUrl, from, to, scale = 1.4) {
+  try {
+    const pdfjsLib = await loadPdfjs();
+    console.log('Starting Page-Vision rendering from URL:', pdfUrl, `pages ${from}-${to}`);
+
+    const pdf = await pdfjsLib.getDocument({ url: pdfUrl }).promise;
+    
+    // Validate and cap the page range
+    const first = Math.max(1, from || 1);
+    const last = Math.min(pdf.numPages, Math.max(first, to || first), first + 5); // Cap at 6 pages max
+    
+    console.log(`PDF loaded from URL, total pages: ${pdf.numPages}, rendering pages ${first} to ${last}`);
+
+    const pages = [];
+
+    for (let i = first; i <= last; i++) {
+      console.log(`Rendering page ${i} for vision...`);
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      const ctx = canvas.getContext('2d');
+
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      // Convert to base64 JPEG (0.82 quality keeps payload small)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+      pages.push({
+        pageNum: i,
+        base64: dataUrl.split(',')[1]
+      });
+
+      canvas.remove(); // Clean up memory
+    }
+
+    console.log(`✅ Page-Vision complete: ${pages.length} pages rendered`);
+    return pages;
+  } catch (error) {
+    console.error('Page-Vision rendering error:', error);
+    throw error;
+  }
+}
