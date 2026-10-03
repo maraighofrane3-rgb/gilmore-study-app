@@ -6,7 +6,7 @@ import {
   BookOpen, Plus, Trash2, ArrowLeft, Loader2, 
   Sparkles, FileText, Lightbulb, List, X, ChevronRight,
   Save, CheckCircle, ChevronDown, Upload, FileText as FileIcon,
-  MessageCircle, Send
+  MessageCircle, Send, PenTool
 } from 'lucide-react';
 
 export default function StudyMaterials() {
@@ -19,17 +19,22 @@ export default function StudyMaterials() {
   const [chapters, setChapters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showMaterialForm, setShowMaterialForm] = useState(false);
+  
+  // Separate forms for chapters vs exercises
   const [showChapterForm, setShowChapterForm] = useState(false);
+  const [showExerciseForm, setShowExerciseForm] = useState(false);
   
   const [showPDFUpload, setShowPDFUpload] = useState(false);
   const [uploadingPDF, setUploadingPDF] = useState(false);
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfTitle, setPdfTitle] = useState('');
+  const [pdfCategory, setPdfCategory] = useState('chapter'); // Track which category the PDF belongs to
   
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
   const [newMaterial, setNewMaterial] = useState({ title: '', description: '' });
   const [newChapter, setNewChapter] = useState({ title: '', content: '' });
+  const [newExercise, setNewExercise] = useState({ title: '', content: '' });
 
   useEffect(() => {
     if (notification.show) {
@@ -97,13 +102,9 @@ export default function StudyMaterials() {
 
     setUploadingPDF(true);
     try {
-      // ⚡ DYNAMIC IMPORT — pdfWorker loads ONLY when user clicks Import PDF
       const { extractTextFromPDF } = await import('../utils/pdfWorker');
-
-      // 1. Extract text for AI analysis
       const extractedText = await extractTextFromPDF(pdfFile);
       
-      // 2. Upload PDF to Supabase Storage for viewing
       const fileExt = pdfFile.name.split('.').pop();
       const fileName = `${user.id}/${Date.now()}.${fileExt}`;
       
@@ -116,23 +117,22 @@ export default function StudyMaterials() {
 
       if (uploadError) throw uploadError;
 
-      // 3. Get the public URL
       const { data: { publicUrl } } = supabase.storage
         .from('pdf-documents')
         .getPublicUrl(fileName);
 
-      // 4. Save BOTH the PDF viewer AND the extracted text
       const { data, error } = await supabase
         .from('chapters')
         .insert([{ 
           user_id: user.id, 
           material_id: selectedMaterial.id, 
-          title: pdfTitle.trim() || 'Untitled Chapter',
+          title: pdfTitle.trim() || 'Untitled',
           content: extractedText,
           pdf_url: publicUrl,
           file_path: fileName,
           is_from_pdf: true,
-          has_images: true
+          has_images: true,
+          category: pdfCategory // 🆕 Pass the category
         }])
         .select()
         .single();
@@ -145,7 +145,10 @@ export default function StudyMaterials() {
       setPdfTitle('');
       
       showNotification(`PDF uploaded successfully! Text extracted for AI analysis.`);
-      navigate(`/study-materials/${selectedMaterial.id}/chapter/${data.id}`);
+      
+      // Navigate to the correct detail page based on category
+      const route = pdfCategory === 'exercise' ? 'exercise' : 'chapter';
+      navigate(`/study-materials/${selectedMaterial.id}/${route}/${data.id}`);
     } catch (err) {
       console.error('PDF upload error:', err);
       showNotification(`Failed to upload PDF: ${err.message}`, 'error');
@@ -179,7 +182,8 @@ export default function StudyMaterials() {
       .insert([{ 
         user_id: user.id, 
         material_id: selectedMaterial.id, 
-        ...newChapter 
+        ...newChapter,
+        category: 'chapter' // 🆕 Explicit category
       }])
       .select()
       .single();
@@ -192,6 +196,30 @@ export default function StudyMaterials() {
       navigate(`/study-materials/${selectedMaterial.id}/chapter/${data.id}`);
     } else {
       showNotification('Failed to add chapter.', 'error');
+    }
+  };
+
+  const handleAddExercise = async (e) => {
+    e.preventDefault();
+    const { data, error } = await supabase
+      .from('chapters')
+      .insert([{ 
+        user_id: user.id, 
+        material_id: selectedMaterial.id, 
+        ...newExercise,
+        category: 'exercise' // 🆕 Explicit category
+      }])
+      .select()
+      .single();
+    
+    if (!error) {
+      setChapters([data, ...chapters]);
+      setNewExercise({ title: '', content: '' });
+      setShowExerciseForm(false);
+      showNotification('Exercise added successfully!');
+      navigate(`/study-materials/${selectedMaterial.id}/exercise/${data.id}`);
+    } else {
+      showNotification('Failed to add exercise.', 'error');
     }
   };
 
@@ -209,7 +237,7 @@ export default function StudyMaterials() {
   const deleteChapter = async (id) => {
     await supabase.from('chapters').delete().eq('id', id);
     setChapters(chapters.filter(c => c.id !== id));
-    showNotification('Chapter deleted.');
+    showNotification('Item deleted.');
   };
 
   const handleBack = () => {
@@ -217,6 +245,10 @@ export default function StudyMaterials() {
     setSelectedMaterial(null);
     setChapters([]);
   };
+
+  // 🆕 Split chapters into two lists
+  const chaptersList = chapters.filter(c => (c.category || 'chapter') === 'chapter');
+  const exercisesList = chapters.filter(c => c.category === 'exercise');
 
   if (loading) {
     return (
@@ -259,109 +291,229 @@ export default function StudyMaterials() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h2 className="font-display text-lg text-yale-blue flex items-center gap-2">
-                <BookOpen size={20} /> Chapters
-              </h2>
-              <div className="flex gap-2">
-                <button onClick={() => setShowPDFUpload(!showPDFUpload)} className="text-maple-rust hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1">
-                  <Upload size={14} /> Import PDF
-                </button>
-                <button onClick={() => setShowChapterForm(!showChapterForm)} className="text-maple-rust hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1">
-                  <Plus size={14} /> Add Chapter
-                </button>
+          {/* Left Column: Chapters & Exercises */}
+          <div className="space-y-8">
+            
+            {/* 📖 CHAPTERS & LECTURES SECTION */}
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <h2 className="font-display text-lg text-yale-blue flex items-center gap-2">
+                  <BookOpen size={20} className="text-maple-rust" /> Chapters & Lectures
+                </h2>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => { setShowPDFUpload(!showPDFUpload); setPdfCategory('chapter'); }} 
+                    className="text-maple-rust hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
+                  >
+                    <Upload size={14} /> Import PDF
+                  </button>
+                  <button 
+                    onClick={() => setShowChapterForm(!showChapterForm)} 
+                    className="text-maple-rust hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
+                  >
+                    <Plus size={14} /> Add
+                  </button>
+                </div>
+              </div>
+
+              {/* PDF Upload Form */}
+              {showPDFUpload && (
+                <form onSubmit={handlePDFSubmit} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
+                  <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream">1. Select PDF Document</label>
+                  <input
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    onChange={handleFileSelect}
+                    disabled={uploadingPDF}
+                    className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+                  />
+                  
+                  {pdfFile && (
+                    <div className="animate-fade-in-up">
+                      <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-1">2. Title (Editable)</label>
+                      <input
+                        type="text"
+                        value={pdfTitle}
+                        onChange={(e) => setPdfTitle(e.target.value)}
+                        placeholder="Enter title"
+                        disabled={uploadingPDF}
+                        className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+                      />
+                    </div>
+                  )}
+
+                  {uploadingPDF && (
+                    <div className="flex items-center gap-2 text-coffee-cream text-sm">
+                      <Loader2 size={14} className="animate-spin" />
+                      Extracting text from PDF...
+                    </div>
+                  )}
+                  
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="submit"
+                      disabled={!pdfFile || uploadingPDF}
+                      className="flex-1 bg-maple-rust text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {uploadingPDF ? 'Processing...' : 'Import PDF'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowPDFUpload(false); setPdfFile(null); setPdfTitle(''); }}
+                      className="px-3 py-2 text-coffee-cream hover:text-maple-rust text-sm"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Manual Chapter Form */}
+              {showChapterForm && (
+                <form onSubmit={handleAddChapter} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
+                  <input 
+                    type="text" 
+                    required 
+                    value={newChapter.title} 
+                    onChange={(e) => setNewChapter({...newChapter, title: e.target.value})} 
+                    placeholder="Chapter Title" 
+                    className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm" 
+                  />
+                  <textarea 
+                    value={newChapter.content} 
+                    onChange={(e) => setNewChapter({...newChapter, content: e.target.value})} 
+                    placeholder="Chapter Content..." 
+                    className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm h-32 resize-none" 
+                  />
+                  <div className="flex gap-2">
+                    <button type="submit" className="flex-1 bg-maple-rust text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all">Save Chapter</button>
+                    <button type="button" onClick={() => setShowChapterForm(false)} className="px-3 py-2 text-coffee-cream hover:text-maple-rust"><X size={16} /></button>
+                  </div>
+                </form>
+              )}
+
+              {/* Chapters List */}
+              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
+                {chaptersList.length === 0 ? (
+                  <p className="text-center text-coffee-cream italic py-4 text-sm">No chapters yet.</p>
+                ) : (
+                  chaptersList.map((chapter) => (
+                    <div 
+                      key={chapter.id} 
+                      onClick={() => navigate(`/study-materials/${selectedMaterial.id}/chapter/${chapter.id}`)} 
+                      className="p-4 rounded-sm border cursor-pointer transition-all group bg-parchment border-coffee-cream/20 hover:border-maple-rust/50"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            {chapter.is_from_pdf && <FileIcon size={14} className="text-maple-rust" />}
+                            <h4 className="font-body text-sm font-medium text-library-ink group-hover:text-maple-rust transition-colors">{chapter.title}</h4>
+                            <span className="font-label text-[0.55rem] uppercase tracking-wider px-1.5 py-0.5 rounded-sm border border-maple-rust/30 text-maple-rust">
+                              Chapter
+                            </span>
+                          </div>
+                          <p className="font-label text-[0.6rem] text-coffee-cream">{new Date(chapter.created_at).toLocaleDateString()}</p>
+                        </div>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); deleteChapter(chapter.id); }} 
+                          className="text-coffee-cream/40 hover:text-maple-rust opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
-            {showPDFUpload && (
-              <form onSubmit={handlePDFSubmit} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
-                <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream">1. Select PDF Document</label>
-                <input
-                  type="file"
-                  accept=".pdf,application/pdf"
-                  onChange={handleFileSelect}
-                  disabled={uploadingPDF}
-                  className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
-                />
-                
-                {pdfFile && (
-                  <div className="animate-fade-in-up">
-                    <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-1">2. Chapter Title (Editable)</label>
-                    <input
-                      type="text"
-                      value={pdfTitle}
-                      onChange={(e) => setPdfTitle(e.target.value)}
-                      placeholder="Enter chapter title"
-                      disabled={uploadingPDF}
-                      className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
-                    />
-                  </div>
-                )}
-
-                {uploadingPDF && (
-                  <div className="flex items-center gap-2 text-coffee-cream text-sm">
-                    <Loader2 size={14} className="animate-spin" />
-                    Extracting text from PDF...
-                  </div>
-                )}
-                
-                <div className="flex gap-2 pt-2">
-                  <button
-                    type="submit"
-                    disabled={!pdfFile || uploadingPDF}
-                    className="flex-1 bg-maple-rust text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {uploadingPDF ? 'Processing...' : 'Import PDF'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setShowPDFUpload(false); setPdfFile(null); setPdfTitle(''); }}
-                    className="px-3 py-2 text-coffee-cream hover:text-maple-rust text-sm"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {showChapterForm && (
-              <form onSubmit={handleAddChapter} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
-                <input type="text" required value={newChapter.title} onChange={(e) => setNewChapter({...newChapter, title: e.target.value})} placeholder="Chapter Title" className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm" />
-                <textarea value={newChapter.content} onChange={(e) => setNewChapter({...newChapter, content: e.target.value})} placeholder="Chapter Content..." className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm h-32 resize-none" />
+            {/* ✍️ EXERCISES & TESTS SECTION */}
+            <div className="space-y-4 pt-6 border-t border-coffee-cream/20">
+              <div className="flex justify-between items-center">
+                <h2 className="font-display text-lg text-yale-blue flex items-center gap-2">
+                  <PenTool size={20} className="text-porch-sage" /> Exercises & Tests
+                </h2>
                 <div className="flex gap-2">
-                  <button type="submit" className="flex-1 bg-maple-rust text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all">Save Chapter</button>
-                  <button type="button" onClick={() => setShowChapterForm(false)} className="px-3 py-2 text-coffee-cream hover:text-maple-rust"><X size={16} /></button>
+                  <button 
+                    onClick={() => { setShowPDFUpload(!showPDFUpload); setPdfCategory('exercise'); }} 
+                    className="text-porch-sage hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
+                  >
+                    <Upload size={14} /> Import PDF
+                  </button>
+                  <button 
+                    onClick={() => setShowExerciseForm(!showExerciseForm)} 
+                    className="text-porch-sage hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
+                  >
+                    <Plus size={14} /> Add
+                  </button>
                 </div>
-              </form>
-            )}
+              </div>
 
-            <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2">
-              {chapters.length === 0 ? (
-                <p className="text-center text-coffee-cream italic py-4 text-sm">No chapters yet.</p>
-              ) : (
-                chapters.map((chapter) => (
-                  <div key={chapter.id} onClick={() => navigate(`/study-materials/${selectedMaterial.id}/chapter/${chapter.id}`)} className={`p-4 rounded-sm border cursor-pointer transition-all group ${selectedMaterial?.id === chapter.id ? 'bg-page-cream border-maple-rust shadow-cozy' : 'bg-parchment border-coffee-cream/20 hover:border-coffee-cream/50'}`}>
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          {chapter.is_from_pdf && <FileIcon size={14} className="text-maple-rust" />}
-                          <h4 className="font-body text-sm font-medium text-library-ink group-hover:text-maple-rust transition-colors">{chapter.title}</h4>
-                        </div>
-                        <p className="font-label text-[0.6rem] text-coffee-cream mt-1">{new Date(chapter.created_at).toLocaleDateString()}</p>
-                      </div>
-                      <button onClick={(e) => { e.stopPropagation(); deleteChapter(chapter.id); }} className="text-coffee-cream/40 hover:text-maple-rust opacity-0 group-hover:opacity-100"><Trash2 size={14} /></button>
-                    </div>
+              {/* Manual Exercise Form */}
+              {showExerciseForm && (
+                <form onSubmit={handleAddExercise} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
+                  <input 
+                    type="text" 
+                    required 
+                    value={newExercise.title} 
+                    onChange={(e) => setNewExercise({...newExercise, title: e.target.value})} 
+                    placeholder="Exercise Title (e.g., TD 3, Exam 2024)" 
+                    className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm" 
+                  />
+                  <textarea 
+                    value={newExercise.content} 
+                    onChange={(e) => setNewExercise({...newExercise, content: e.target.value})} 
+                    placeholder="Exercise instructions or content..." 
+                    className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm h-32 resize-none" 
+                  />
+                  <div className="flex gap-2">
+                    <button type="submit" className="flex-1 bg-porch-sage text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all">Save Exercise</button>
+                    <button type="button" onClick={() => setShowExerciseForm(false)} className="px-3 py-2 text-coffee-cream hover:text-maple-rust"><X size={16} /></button>
                   </div>
-                ))
+                </form>
               )}
+
+              {/* Exercises List */}
+              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
+                {exercisesList.length === 0 ? (
+                  <p className="text-center text-coffee-cream italic py-4 text-sm">No exercises yet.</p>
+                ) : (
+                  exercisesList.map((exercise) => (
+                    <div 
+                      key={exercise.id} 
+                      onClick={() => navigate(`/study-materials/${selectedMaterial.id}/exercise/${exercise.id}`)} 
+                      className="p-4 rounded-sm border cursor-pointer transition-all group bg-parchment border-coffee-cream/20 hover:border-porch-sage/50"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            {exercise.is_from_pdf && <FileIcon size={14} className="text-porch-sage" />}
+                            <h4 className="font-body text-sm font-medium text-library-ink group-hover:text-porch-sage transition-colors">{exercise.title}</h4>
+                            <span className="font-label text-[0.55rem] uppercase tracking-wider px-1.5 py-0.5 rounded-sm border border-porch-sage/30 text-porch-sage">
+                              Exercise
+                            </span>
+                          </div>
+                          <p className="font-label text-[0.6rem] text-coffee-cream">{new Date(exercise.created_at).toLocaleDateString()}</p>
+                        </div>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); deleteChapter(exercise.id); }} 
+                          className="text-coffee-cream/40 hover:text-maple-rust opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
 
+          {/* Right Column: Placeholder */}
           <div className="lg:col-span-2">
             <div className="text-center text-coffee-cream italic py-20 bg-parchment/50 rounded-sm border border-coffee-cream/20 h-full flex flex-col items-center justify-center">
               <BookOpen size={48} className="mx-auto mb-4 opacity-30" />
-              <p>Select a chapter to open it in the detailed view.</p>
+              <p>Select a chapter or exercise to open it in the detailed view.</p>
             </div>
           </div>
         </div>

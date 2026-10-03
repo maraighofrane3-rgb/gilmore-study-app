@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import MarkdownLite from '../components/MarkdownLite';
 import { extractTextFromPDF, renderPDFAsImages, renderPagesBase64, renderUrlPagesBase64 } from '../utils/pdfWorker';
 import {
@@ -11,9 +11,10 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 
-export default function ChapterDetail() {
+export default function ExerciseDetail() {
   const { materialId, chapterId } = useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [material, setMaterial] = useState(null);
   const [chapter, setChapter] = useState(null);
@@ -184,6 +185,14 @@ export default function ChapterDetail() {
       supabase.from('chapter_notes').select('*').eq('chapter_id', chapterId).order('created_at', { ascending: false }),
       supabase.from('doc_scans').select('*').eq('doc_id', chapterId).order('position'),
     ]);
+
+    // 🧭 Guard: this page only serves exercise-category docs
+    if (chapRes.data && (chapRes.data.category || 'chapter') !== 'exercise') {
+      showNotification('This is a chapter — opening the chapter page.');
+      navigate(`/study-materials/${materialId}/chapter/${chapterId}`, { replace: true });
+      return;
+    }
+
     setMaterial(matRes.data);
     setChapter(chapRes.data);
     setSavedNotes(notesRes.data || []);
@@ -191,14 +200,13 @@ export default function ChapterDetail() {
     setLoading(false);
   };
 
-  // 📕 Upload the chapter's PDF (with Vision Rescue for Arabic/scanned PDFs)
+  // 📕 Upload the exercise's PDF (with Vision Rescue for Arabic/scanned PDFs)
   const handlePDFUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || file.type !== 'application/pdf') return;
 
     setUploadingPDF(true);
     try {
-      // 1. Standard extraction — never let it kill the flow (scanned PDFs throw here)
       let extractedText = '';
       try {
         extractedText = await extractTextFromPDF(file);
@@ -207,7 +215,6 @@ export default function ChapterDetail() {
         extractedText = '';
       }
 
-      // 2. 🚨 VISION RESCUE TRIGGER
       const cidCount = (extractedText.match(/\(cid:\d+\)/g) || []).length;
       const isGarbage =
         extractedText.trim().length < 100 ||
@@ -234,7 +241,6 @@ export default function ChapterDetail() {
         }
       }
 
-      // 3. Render images for the UI display
       const htmlContent = await renderPDFAsImages(file);
 
       const divider = `\n\n<div class="pdf-divider" style="text-align: center; margin: 2rem 0; color: #8b5e3c; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; border-top: 1px solid #d4c5b5; border-bottom: 1px solid #d4c5b5; padding: 1rem 0;">📄 ${file.name} · added on ${new Date().toLocaleDateString()}</div>\n\n`;
@@ -245,7 +251,6 @@ export default function ChapterDetail() {
         ? chapter.content + divider + htmlContent
         : (chapter.content ? `<div style="white-space: pre-wrap;">${chapter.content}</div>` + divider : '') + htmlContent;
 
-      // 4. Upload PDF to Storage
       const fileExt = file.name.split('.').pop();
       const fileName = `${user.id}/chapters/${Date.now()}.${fileExt}`;
 
@@ -371,13 +376,13 @@ export default function ChapterDetail() {
     }
     setChapter({ ...chapter, title: editTitle.trim() || 'Untitled', content: editContent });
     setEditing(false);
-    showNotification('Chapter updated!');
+    showNotification('Exercise updated!');
   };
 
   // ✅ Generate cache key for AI requests
   const generateCacheKey = (action, from, to) => {
     const hasRangeLocal = fromPage !== '' || toPage !== '';
-    const source = hasRangeLocal ? `pages-${from}-${to}` : 'full-chapter';
+    const source = hasRangeLocal ? `pages-${from}-${to}` : 'full-exercise';
     return `${chapter.id}_${action}_${source}`;
   };
 
@@ -483,7 +488,7 @@ export default function ChapterDetail() {
     const canReadScans = scans.length > 0;
 
     if (!rawText && !canReadPdf && !canReadScans) {
-      showNotification('This chapter has no readable text yet. Click "Add PDF" or upload scanned notes.', 'error');
+      showNotification('This exercise has no readable content yet. Click "Add PDF" or upload scanned notes.', 'error');
       return;
     }
 
@@ -492,14 +497,14 @@ export default function ChapterDetail() {
     const hasRangeLocal = fromPage !== '' || toPage !== '';
 
     let sourceText = rawText;
-    let scope = 'this chapter';
+    let scope = 'this exercise';
     let pageImages = null;
 
     if (hasRangeLocal) {
       const ranged = getPageRangeText(f, t);
       if (ranged === null) {
         sourceText = rawText;
-        scope = 'this chapter';
+        scope = 'this exercise';
       } else if (ranged === '') {
         if (chapter?.pdf_url) {
           pageImages = await safeRenderPages(chapter.pdf_url, f, t);
@@ -534,7 +539,7 @@ export default function ChapterDetail() {
     }
 
     if (!sourceText && !pageImages && !canReadPdf) {
-      showNotification('This chapter has no readable text yet. Click "Add PDF" or upload scanned notes.', 'error');
+      showNotification('This exercise has no readable content yet. Click "Add PDF" or upload scanned notes.', 'error');
       return;
     }
 
@@ -562,10 +567,10 @@ export default function ChapterDetail() {
       let charLimit = 5000;
 
       if (action === 'summarize') {
-        systemPrompt = `Provide a concise, clear summary of ${scope} from "${chapter.title}". Focus on the main ideas and key takeaways in 2-3 paragraphs.`;
+        systemPrompt = `Provide a concise, clear summary of ${scope} from "${chapter.title}". Focus on the main ideas, methods and key takeaways in 2-3 paragraphs.`;
         charLimit = 5000;
       } else if (action === 'explain') {
-        systemPrompt = `Explain ${scope} from "${chapter.title}" in simple, clear terms. Break down any complex concepts or jargon.`;
+        systemPrompt = `Explain ${scope} from "${chapter.title}" in simple, clear terms. Break down any complex concepts, formulas or jargon step by step.`;
         charLimit = 5000;
       } else if (action === 'keypoints') {
         systemPrompt = `Extract the 5-7 most important key points from ${scope} of "${chapter.title}". Present them as a bulleted list.`;
@@ -636,7 +641,7 @@ D) option
       if (!baseText && !canReadPdf && !canReadScans) {
         setChatMessages(prev => [...prev, {
           role: 'assistant',
-          content: "This chapter has no readable content yet. Click 'Add PDF' or upload scanned notes, then ask me anything!"
+          content: "This exercise has no readable content yet. Click 'Add PDF' or upload scanned notes, then ask me anything!"
         }]);
         setIsAsking(false);
         return;
@@ -660,7 +665,7 @@ D) option
             setChatMessages(prev => [...prev, {
               role: 'assistant',
               content: textBounds
-                ? `Pages ${chatRangeFrom}–${chatRangeTo} contain no readable text (usually the cover & contents). The readable text runs from page ${textBounds.first} to ${textBounds.last} — try a range inside that!`
+                ? `Pages ${chatRangeFrom}–${chatRangeTo} contain no readable text. The readable text runs from page ${textBounds.first} to ${textBounds.last} — try a range inside that!`
                 : "I can't find readable text for that page range. Try different page numbers."
             }]);
             setIsAsking(false);
@@ -668,13 +673,13 @@ D) option
           }
         } else {
           context = ranged;
-          scopeNote = ` (Answer using ONLY pages ${chatRangeFrom} to ${chatRangeTo} of the chapter.)`;
+          scopeNote = ` (Answer using ONLY pages ${chatRangeFrom} to ${chatRangeTo} of the exercise.)`;
         }
       }
 
       context = (context || '').replace(/\s+/g, ' ').trim();
 
-      // 🎯 PAGE-VISION FALLBACK for whole-chapter questions on garbage text
+      // 🎯 PAGE-VISION FALLBACK for whole-exercise questions on garbage text
       if (isGarbageText(context) && !pageImages && chapter?.pdf_url) {
         pageImages = await safeRenderPages(chapter.pdf_url, chatHasRange ? chatRangeFrom : 1, chatHasRange ? chatRangeTo : 4);
       }
@@ -688,7 +693,7 @@ D) option
       if (!context && !pageImages && !canReadPdf) {
         setChatMessages(prev => [...prev, {
           role: 'assistant',
-          content: "This chapter has no readable content yet. Click 'Add PDF' or upload scanned notes, then ask me anything!"
+          content: "This exercise has no readable content yet. Click 'Add PDF' or upload scanned notes, then ask me anything!"
         }]);
         setIsAsking(false);
         return;
@@ -787,7 +792,7 @@ D) option
   };
 
   const renderContent = (content) => {
-    if (!content) return 'No content yet. Import a PDF or click Edit to write something.';
+    if (!content) return 'No content yet. Upload an exercise PDF or scan your paper notes above.';
 
     if (content.includes('<img') || content.includes('<div class="pdf-pages"') || content.includes('<div class="pdf-divider"')) {
       return (
@@ -805,7 +810,7 @@ D) option
     return (
       <div className="max-w-5xl mx-auto py-20 text-center">
         <Loader2 size={32} className="animate-spin mx-auto text-coffee-cream mb-4" />
-        <p className="font-body text-coffee-cream italic">Opening your chapter...</p>
+        <p className="font-body text-coffee-cream italic">Opening your exercise...</p>
       </div>
     );
   }
@@ -813,16 +818,13 @@ D) option
   if (!chapter) {
     return (
       <div className="max-w-5xl mx-auto py-20 text-center">
-        <p className="font-body text-coffee-cream italic">Chapter not found.</p>
+        <p className="font-body text-coffee-cream italic">Exercise not found.</p>
         <Link to={`/study-materials/${materialId}`} className="inline-block mt-4 text-maple-rust hover:underline font-label text-xs uppercase tracking-wider">
           ← Back to material
         </Link>
       </div>
     );
   }
-
-  const category = chapter.category || 'chapter';
-  const isExercise = category === 'exercise';
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-fade-in-up">
@@ -846,17 +848,14 @@ D) option
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             {chapter.is_from_pdf && <FileIcon size={16} className="text-maple-rust" />}
             <h1 className="font-display text-2xl text-yale-blue">{chapter.title}</h1>
-            <span className={`font-label text-[0.6rem] uppercase tracking-wider px-2 py-1 rounded-sm border ${
-              isExercise 
-                ? 'border-porch-sage/40 text-porch-sage' 
-                : 'border-maple-rust/40 text-maple-rust'
-            }`}>
-              {isExercise ? '✍️ Exercise / Test' : '📖 Chapter / Lecture'}
+            <span className="font-label text-[0.6rem] uppercase tracking-wider px-2 py-1 rounded-sm border border-porch-sage/40 text-porch-sage">
+              <FileText size={10} className="inline mr-1" />
+              Exercise / Test
             </span>
           </div>
           <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream">
             {new Date(chapter.created_at).toLocaleDateString()}
-            {chapter.is_from_pdf && ' · PDF Chapter'}
+            {chapter.is_from_pdf && ' · PDF document'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -881,7 +880,7 @@ D) option
       {editing ? (
         <div className="bg-parchment p-6 rounded-sm border border-maple-rust/40 shadow-cozy space-y-4">
           <h3 className="font-display text-lg text-yale-blue flex items-center gap-2">
-            <Pencil size={16} className="text-maple-rust" /> Edit Chapter
+            <Pencil size={16} className="text-maple-rust" /> Edit Exercise
           </h3>
           <div>
             <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-1">Title</label>
@@ -953,10 +952,10 @@ D) option
           </div>
         </div>
         <p className="font-body text-xs text-coffee-cream italic">
-          Photograph your paper notes (exercises, corrections, lecture margins). The AI reads them via vision when analyzing or answering questions.
+          Photograph your handwritten solutions, corrections, or test sheets. The AI reads them via vision when analyzing or answering questions.
         </p>
         {scans.length === 0 ? (
-          <p className="text-center text-coffee-cream italic text-sm py-4">No scans yet — upload photos of your handwritten notes.</p>
+          <p className="text-center text-coffee-cream italic text-sm py-4">No scans yet — upload photos of your handwritten solutions.</p>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {scans.map((s, idx) => (
@@ -998,7 +997,7 @@ D) option
             placeholder="To (10)"
             className="w-24 p-2.5 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
           />
-          <span className="font-body text-xs text-coffee-cream italic">Leave empty to analyze the whole chapter.</span>
+          <span className="font-body text-xs text-coffee-cream italic">Leave empty to analyze the whole exercise.</span>
           {textBounds && (
             <span className="font-body text-xs text-porch-sage italic">
               Readable text: pages {textBounds.first}–{textBounds.last}.
@@ -1021,7 +1020,6 @@ D) option
           </button>
         </div>
 
-        {/* ✅ Retry message */}
         {retryMessage && (
           <div className="flex items-center gap-2 p-3 bg-gilmore-gold/10 border border-gilmore-gold/30 rounded-sm animate-fade-in-up">
             <Loader2 size={16} className="animate-spin text-gilmore-gold" />
@@ -1037,7 +1035,7 @@ D) option
             </div>
             <div>
               <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-1">Note title (optional)</label>
-              <input type="text" value={noteTitle} onChange={(e) => setNoteTitle(e.target.value)} placeholder="e.g. Chapter 1 Summary..." className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm" />
+              <input type="text" value={noteTitle} onChange={(e) => setNoteTitle(e.target.value)} placeholder="e.g. TD 3 corrections..." className="w-full p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm" />
             </div>
             <div className="flex justify-end">
               <button onClick={handleSaveNote} disabled={justSaved} className={`flex items-center gap-2 px-5 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider transition-all duration-300 ${justSaved ? 'bg-porch-sage text-page-cream cursor-default' : 'bg-maple-rust text-page-cream hover:bg-yale-blue'}`}>
@@ -1053,10 +1051,10 @@ D) option
         <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
             <MessageCircle size={18} className="text-maple-rust" />
-            <h3 className="font-display text-lg text-yale-blue">Ask questions about this chapter</h3>
+            <h3 className="font-display text-lg text-yale-blue">Ask questions about this exercise</h3>
           </div>
           <span className="font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream bg-page-cream border border-coffee-cream/20 px-2 py-1 rounded-sm">
-            {chatHasRange ? `📖 Pages ${chatRangeFrom}–${chatRangeTo}` : '📖 Whole chapter'}
+            {chatHasRange ? `📖 Pages ${chatRangeFrom}–${chatRangeTo}` : '📖 Whole exercise'}
           </span>
         </div>
 
@@ -1079,7 +1077,7 @@ D) option
             placeholder="To (10)"
             className="w-24 p-2.5 bg-page-cream border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
           />
-          <span className="font-body text-xs text-coffee-cream italic">Leave empty to use the whole chapter.</span>
+          <span className="font-body text-xs text-coffee-cream italic">Leave empty to use the whole exercise.</span>
           {textBounds && (
             <span className="font-body text-xs text-porch-sage italic">
               Readable text: pages {textBounds.first}–{textBounds.last}.
@@ -1089,20 +1087,18 @@ D) option
 
         <div className="bg-page-cream/50 rounded-sm border border-coffee-cream/20 h-64 overflow-y-auto p-4 space-y-3">
           {chatMessages.length === 0 ? (
-            <p className="text-center text-coffee-cream italic text-sm py-8">Ask me anything about this chapter's content!</p>
+            <p className="text-center text-coffee-cream italic text-sm py-8">Ask me anything about this exercise — solutions, methods, corrections!</p>
           ) : (
             chatMessages.map((msg, idx) => (
-                              <div className={`max-w-[85%] p-3 rounded-sm text-sm leading-relaxed ${
-                  msg.role === 'user'
-                    ? 'bg-yale-blue text-page-cream rounded-br-none'
-                    : 'bg-parchment border border-coffee-cream/20 text-library-ink rounded-bl-none'
-                }`}>
-                  {msg.role === 'user'
-                    ? msg.content
-                    : <MarkdownLite text={msg.content} className="text-[0.85rem]" />}
-                </div>
-      
-              
+              <div key={idx} className={`max-w-[85%] p-3 rounded-sm text-sm leading-relaxed ${
+                msg.role === 'user'
+                  ? 'bg-yale-blue text-page-cream rounded-br-none'
+                  : 'bg-parchment border border-coffee-cream/20 text-library-ink rounded-bl-none'
+              }`}>
+                {msg.role === 'user'
+                  ? msg.content
+                  : <MarkdownLite text={msg.content} className="text-[0.85rem]" />}
+              </div>
             ))
           )}
           {isAsking && (
@@ -1113,7 +1109,6 @@ D) option
               </div>
             </div>
           )}
-          {/* ✅ Chat retry message */}
           {chatRetryMessage && (
             <div className="flex justify-start">
               <div className="bg-gilmore-gold/10 border border-gilmore-gold/30 p-3 rounded-sm rounded-bl-none flex items-center gap-2">
@@ -1130,7 +1125,7 @@ D) option
             type="text"
             value={questionInput}
             onChange={(e) => setQuestionInput(e.target.value)}
-            placeholder="e.g. What is the main cause of...?"
+            placeholder="e.g. How do I solve exercise 2? / What method is used here?"
             disabled={isAsking}
             className="flex-1 p-3 bg-page-cream border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm disabled:opacity-50"
           />

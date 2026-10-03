@@ -26,6 +26,7 @@ const Settings       = lazy(() => import('./pages/Settings'));
 const Achievements   = lazy(() => import('./pages/Achievements'));
 const StudyMaterials = lazy(() => import('./pages/StudyMaterials'));
 const ChapterDetail  = lazy(() => import('./pages/ChapterDetail'));
+const ExerciseDetail = lazy(() => import('./pages/ExerciseDetail'));
 const History        = lazy(() => import('./pages/History'));
 
 function PageLoader() {
@@ -72,6 +73,7 @@ function App() {
               <Route path="study-materials" element={<StudyMaterials />} />
               <Route path="study-materials/:materialId" element={<StudyMaterials />} />
               <Route path="study-materials/:materialId/chapter/:chapterId" element={<ChapterDetail />} />
+              <Route path="study-materials/:materialId/exercise/:chapterId" element={<ExerciseDetail />} />
               <Route path="history" element={<History />} />
               <Route path="weekly-report" element={<WeeklyReport />} />
             </Route>
