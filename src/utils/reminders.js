@@ -36,11 +36,30 @@ export async function requestBrowserNotifications() {
   return p === 'granted';
 }
 
-export function maybeShowLocalReminder(stats) {
+export async function maybeShowLocalReminder(stats) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+  // 🎚️ Respect the Privacy → "Study Reminders" master toggle
+  const { data: who } = await supabase.auth.getUser();
+  if (!who?.user) return;
+  const { data: prof } = await supabase
+    .from('profiles')
+    .select('notifications_enabled')
+    .eq('id', who.user.id)
+    .maybeSingle();
+  if (prof && prof.notifications_enabled === false) return;
+
+  const { data: rem } = await supabase
+    .from('reminder_settings')
+    .select('browser_notifications')
+    .eq('user_id', who.user.id)
+    .maybeSingle();
+  if (rem && rem.browser_notifications === false) return;
+
   const last = localStorage.getItem('rgw-last-reminder-toast');
   if (last && Date.now() - Number(last) < 3 * 3600e3) return;
   localStorage.setItem('rgw-last-reminder-toast', String(Date.now()));
+
   new Notification('📜 Your desk is waiting', {
     body: `${stats.tasksDue} tasks left · ${stats.goalHours}h goal · 🔥 ${stats.streak}-day streak`,
   });

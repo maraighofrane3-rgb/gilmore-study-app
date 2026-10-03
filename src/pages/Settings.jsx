@@ -443,16 +443,18 @@ export default function Settings() {
                     type="checkbox"
                     checked={profile.email_notifications}
                     onChange={async (e) => {
-                      const newValue = e.target.checked;
-                      setProfile(prev => ({ ...prev, email_notifications: newValue }));
-                      const { error } = await supabase.from('profiles').update({ email_notifications: newValue }).eq('id', user.id);
-                      if (error) {
-                        setProfile(prev => ({ ...prev, email_notifications: !newValue }));
-                        setMessage({ type: 'error', text: 'Failed to update preferences.' });
-                      } else {
-                        setMessage({ type: 'success', text: 'Preferences saved.' });
-                      }
-                    }}
+  const newValue = e.target.checked;
+  setProfile(prev => ({ ...prev, email_notifications: newValue }));
+  const { error } = await supabase.from('profiles').update({ email_notifications: newValue }).eq('id', user.id);
+  // 🔔 Master switch → sync the reminder pipeline's own table
+  await supabase.from('reminder_settings').update({ email_notifications: newValue }).eq('user_id', user.id);
+  if (error) {
+    setProfile(prev => ({ ...prev, email_notifications: !newValue }));
+    setMessage({ type: 'error', text: 'Failed to update preferences.' });
+  } else {
+    setMessage({ type: 'success', text: newValue ? 'Email reminders ON.' : 'Email reminders OFF — the 3h emails will stop.' });
+  }
+}}
                     className="sr-only peer"
                   />
                   <div className="w-11 h-6 bg-coffee-cream/20 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-page-cream after:border-coffee-cream/30 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-maple-rust"></div>
@@ -471,23 +473,26 @@ export default function Settings() {
                     type="checkbox"
                     checked={profile.notifications_enabled}
                     onChange={async (e) => {
-                      const newValue = e.target.checked;
-                      if (newValue) {
-                        const granted = await requestNotificationPermission();
-                        if (!granted) {
-                          setMessage({ type: 'error', text: 'Notification permission denied by browser.' });
-                          return;
-                        }
-                      }
-                      setProfile(prev => ({ ...prev, notifications_enabled: newValue }));
-                      const { error } = await supabase.from('profiles').update({ notifications_enabled: newValue }).eq('id', user.id);
-                      if (error) {
-                        setProfile(prev => ({ ...prev, notifications_enabled: !newValue }));
-                        setMessage({ type: 'error', text: 'Failed to update preferences.' });
-                      } else {
-                        setMessage({ type: 'success', text: 'Preferences saved.' });
-                      }
-                    }}
+  const newValue = e.target.checked;
+  if (newValue) {
+    const granted = await requestNotificationPermission();
+    if (!granted) {
+      setMessage({ type: 'error', text: 'Notification permission denied by browser.' });
+      return;
+    }
+  }
+  setProfile(prev => ({ ...prev, notifications_enabled: newValue }));
+  const { error } = await supabase.from('profiles').update({ notifications_enabled: newValue }).eq('id', user.id);
+  // 🔔 Master switch → sync reminder settings + remember browser choice
+  await supabase.from('reminder_settings').update({ browser_notifications: newValue }).eq('user_id', user.id);
+  if (error) {
+    setProfile(prev => ({ ...prev, notifications_enabled: !newValue }));
+    setMessage({ type: 'error', text: 'Failed to update preferences.' });
+  } else {
+    setRemBrowser(newValue);
+    setMessage({ type: 'success', text: newValue ? 'OS alerts ON while the app is open.' : 'OS alerts OFF.' });
+  }
+}}
                     className="sr-only peer"
                   />
                   <div className="w-11 h-6 bg-coffee-cream/20 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-page-cream after:border-coffee-cream/30 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-maple-rust"></div>
