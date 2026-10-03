@@ -359,7 +359,7 @@
 
 /* 🎓 HARVARD — crimson · oxblood · brass · ivy on warm ivory */
 :root[data-theme="harvard"] {
-  --color-page-cream:     #F7F2E9;   /* warm ivory, like Widener's reading rooms */
+  --color-page-cream:     #f7f2e9;   /* warm ivory, like Widener's reading rooms */
   --color-parchment:      #EFE7D8;   /* aged card stock */
   --color-library-ink:    #26201F;   /* warm near-black ink */
   --color-yale-blue:      #7D1128;   /* deep oxblood crimson — headings */
@@ -369,8 +369,46 @@
   --color-porch-sage:     #3E5F43;   /* Harvard Yard ivy green — success */
 
   /* Sidebar: dark oxblood leather, like a dorm common room */
-  --color-sidebar-bg:     #540819;
+  --color-sidebar-bg:     #520a17;
   --color-sidebar-text:   #F4EBDD;
   --color-sidebar-muted:  #C2A79B;   /* rosy parchment */
   --color-sidebar-accent: #D9A441;   /* brass, pops on oxblood */
+}
+
+ [data-theme="vampire"] {
+    color-scheme: dark;
+    --color-page-cream:     #1e0000;   /* night black — main app background */
+    --color-parchment:      #3B0B16;   /* blood maroon — card surfaces */
+    --color-library-ink:    #C6B3A0;   /* bone — body text on dark cards */
+    --color-yale-blue:      #E4D7C2;   /* bone-light — headings */
+    --color-maple-rust:     #b90000;   /* blood-light — links, primary accent */
+    --color-coffee-cream:   #9A8977;   /* muted bone — secondary text */
+    --color-gilmore-gold:   #C6B3A0;   /* bone — icons & highlights */
+    --color-porch-sage:     #be3b4e;   /* bordeaux — success states */
+
+    /* Sidebar: deep blood — darker than parchment, distinct from night black */
+    --color-sidebar-bg:     #35030e;
+    --color-sidebar-text:   #E4D7C2;
+    --color-sidebar-muted:  #9A8977;
+    --color-sidebar-accent: #B4485A;
+  }
+
+
+/* Focus Zone custom range slider */
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #c2410c; /* maple-rust */
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #c2410c;
+  cursor: pointer;
+  border: none;
 }

@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { User, Lock, Palette, Clock, Save, CheckCircle, AlertTriangle, Trash2 } from 'lucide-react';
+import { User, Lock, Palette, Clock, Save, CheckCircle, AlertTriangle, Trash2, Bell } from 'lucide-react';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { requestNotificationPermission, sendNotification, MESSAGES } from '../lib/notifications';
+import { ensureReminderRow, requestBrowserNotifications } from '../utils/reminders';
 
 const TABS = [
   { id: 'account', label: 'Account', icon: User },
+  { id: 'reminders', label: 'Reminders', icon: Bell },
   { id: 'privacy', label: 'Privacy', icon: Lock },
   { id: 'appearance', label: 'Appearance', icon: Palette },
 ];
@@ -18,6 +20,7 @@ const THEMES = [
   { id: 'library', label: 'Library', tagline: 'Green lamp, worn leather chairs', swatch: ['#16211C', '#F0E4C4', '#C77B4D', '#C9A227'] },
   { id: 'cream', label: 'Cream', tagline: 'Sunlit morning at the counter', swatch: ['#FBF6EC', '#2F4F63', '#B85C3E', '#D4B15C'] },
   { id: 'harvard', label: 'Harvard', tagline: 'Crimson ink on ivory pages', swatch: ['#F7F2E9', '#7D1128', '#A51C30', '#A9822E'] },
+  { id: 'vampire', label: 'Vampire', tagline: 'Bordeaux ink on midnight vellum', swatch: ['#121114', '#C6B3A0', '#8F2A3A', '#611220'] },
 ];
 
 export default function Settings() {
@@ -37,6 +40,14 @@ export default function Settings() {
     email_notifications: true,
     notifications_enabled: true
   });
+
+  // 🔔 Reminder settings state
+  const [remEnabled, setRemEnabled] = useState(true);
+  const [remEmail, setRemEmail] = useState(true);
+  const [remBrowser, setRemBrowser] = useState(false);
+  const [remWake, setRemWake] = useState(9);
+  const [remSleep, setRemSleep] = useState(21);
+
   const [passwordData, setPasswordData] = useState({ password: '', confirmPassword: '' });
 
   useEffect(() => {
@@ -62,42 +73,104 @@ export default function Settings() {
         notifications_enabled: data.notifications_enabled !== false
       });
     }
+
+    // 🔔 Fetch reminder settings
+    const { data: remData } = await supabase
+      .from('reminder_settings')
+      .select('*')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (remData) {
+      setRemEnabled(remData.enabled);
+      setRemEmail(remData.email_notifications);
+      setRemBrowser(remData.browser_notifications);
+      setRemWake(remData.wake_hour || 9);
+      setRemSleep(remData.sleep_hour || 21);
+    } else {
+      // Create the row if it doesn't exist
+      await ensureReminderRow();
+    }
+
     setLoading(false);
   };
 
- const handleSaveProfile = async (e) => {
-  e.preventDefault();
-  setSaving(true);
-  setMessage({ type: '', text: '' });
+  const handleSaveProfile = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setMessage({ type: '', text: '' });
 
-  // ✅ Only update allowed fields (exclude id, email, etc.)
-  const updates = {
-    username: profile.username,
-    bio: profile.bio,
-    theme: profile.theme,
-    default_pomodoro_duration: parseInt(profile.default_pomodoro_duration) || 25,
-    default_daily_goal_hours: parseFloat(profile.default_daily_goal_hours) || 2,
-    email_notifications: profile.email_notifications,
-    notifications_enabled: profile.notifications_enabled,
-    updated_at: new Date().toISOString()
+    const updates = {
+      username: profile.username,
+      bio: profile.bio,
+      theme: profile.theme,
+      default_pomodoro_duration: parseInt(profile.default_pomodoro_duration) || 25,
+      default_daily_goal_hours: parseFloat(profile.default_daily_goal_hours) || 2,
+      email_notifications: profile.email_notifications,
+      notifications_enabled: profile.notifications_enabled,
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', user.id);
+
+    if (error) {
+      setMessage({ type: 'error', text: `Failed to save: ${error.message}` });
+    } else {
+      setMessage({ type: 'success', text: 'Settings saved successfully.' });
+    }
+    setSaving(false);
   };
 
-  console.log('Saving updates:', updates);
+  const saveReminderSettings = async () => {
+    setSaving(true);
+    setMessage({ type: '', text: '' });
 
-  const { data, error } = await supabase
-    .from('profiles')
-    .update(updates)
-    .eq('id', user.id);
+    const offset = -Math.round(new Date().getTimezoneOffset() / 60);
+    const { error } = await supabase.from('reminder_settings').upsert({
+      user_id: user.id,
+      enabled: remEnabled,
+      email_notifications: remEmail,
+      browser_notifications: remBrowser,
+      wake_hour: remWake,
+      sleep_hour: remSleep,
+      tz_offset: offset,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
 
-  if (error) {
-    console.error('Save error:', error);
-    setMessage({ type: 'error', text: `Failed to save: ${error.message}` });
-  } else {
-    console.log('Save successful:', data);
-    setMessage({ type: 'success', text: 'Settings saved successfully.' });
-  }
-  setSaving(false);
-};
+    if (error) {
+      setMessage({ type: 'error', text: `Failed to save reminders: ${error.message}` });
+    } else {
+      setMessage({ type: 'success', text: 'Reminder settings saved! You\'ll receive emails every 3 hours during your waking window.' });
+    }
+    setSaving(false);
+  };
+
+  const enableBrowserNotifs = async () => {
+    const ok = await requestBrowserNotifications();
+    if (ok) {
+      setRemBrowser(true);
+      setMessage({ type: 'success', text: 'Browser notifications enabled! You\'ll see local reminders while the app is open.' });
+    } else {
+      setMessage({ type: 'error', text: 'Permission denied. Enable notifications in your browser settings.' });
+    }
+  };
+
+  const testReminder = async () => {
+    setSaving(true);
+    setMessage({ type: '', text: '' });
+    const { error } = await supabase.functions.invoke('send-reminders', {
+      body: { test: true, userId: user.id },
+    });
+    if (error) {
+      setMessage({ type: 'error', text: `Test failed: ${error.message}` });
+    } else {
+      setMessage({ type: 'success', text: 'Test email sent! Check your inbox in the next minute.' });
+    }
+    setSaving(false);
+  };
 
   const handleChangePassword = async (e) => {
     e.preventDefault();
@@ -133,7 +206,6 @@ export default function Settings() {
     }
   };
 
-  // ✅ FIX: Auto-save theme to database immediately when clicked
   const handlePickTheme = async (id) => {
     setTheme(id);
     setProfile(prev => ({ ...prev, theme: id }));
@@ -239,6 +311,122 @@ export default function Settings() {
             </div>
           )}
 
+          {activeTab === 'reminders' && (
+            <div className="space-y-6">
+              <h2 className="font-display text-2xl text-yale-blue mb-4">Study Reminders</h2>
+              <p className="font-body text-sm text-coffee-cream mb-6">
+                Get nudged every 3 hours during your waking window to keep your streak alive and your tasks moving.
+              </p>
+
+              <div className="space-y-4">
+                <label className="flex items-center gap-3 font-body text-sm text-library-ink">
+                  <input 
+                    type="checkbox" 
+                    checked={remEnabled} 
+                    onChange={(e) => setRemEnabled(e.target.checked)}
+                    className="w-4 h-4 rounded border-coffee-cream/30 text-maple-rust focus:ring-maple-rust/25"
+                  />
+                  <span className="font-medium">Enable reminders</span>
+                </label>
+
+                <label className="flex items-center gap-3 font-body text-sm text-library-ink">
+                  <input 
+                    type="checkbox" 
+                    checked={remEmail} 
+                    onChange={(e) => setRemEmail(e.target.checked)}
+                    disabled={!remEnabled}
+                    className="w-4 h-4 rounded border-coffee-cream/30 text-maple-rust focus:ring-maple-rust/25 disabled:opacity-50"
+                  />
+                  <span>Email reminders</span>
+                </label>
+
+                <label className="flex items-center gap-3 font-body text-sm text-library-ink">
+                  <input 
+                    type="checkbox" 
+                    checked={remBrowser} 
+                    onChange={async (e) => {
+                      if (e.target.checked) {
+                        const ok = await requestBrowserNotifications();
+                        if (ok) setRemBrowser(true);
+                      } else {
+                        setRemBrowser(false);
+                      }
+                    }}
+                    disabled={!remEnabled}
+                    className="w-4 h-4 rounded border-coffee-cream/30 text-maple-rust focus:ring-maple-rust/25 disabled:opacity-50"
+                  />
+                  <span>Browser notifications (while app is open)</span>
+                </label>
+              </div>
+
+              <div className="pt-6 border-t border-coffee-cream/20">
+                <h3 className="font-display text-lg text-yale-blue mb-3">Waking Hours</h3>
+                <p className="font-body text-sm text-coffee-cream mb-4">
+                  We won't ping you outside these hours (your local time):
+                </p>
+                <div className="flex items-center gap-4">
+                  <div>
+                    <label className="block font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream mb-1.5">From</label>
+                    <input 
+                      type="number" 
+                      min="0" 
+                      max="23" 
+                      value={remWake} 
+                      onChange={(e) => setRemWake(+e.target.value)}
+                      disabled={!remEnabled}
+                      className="w-20 p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:ring-2 focus:ring-maple-rust/25 focus:border-maple-rust font-body disabled:opacity-50"
+                    />
+                    <span className="ml-2 font-body text-sm text-coffee-cream">:00</span>
+                  </div>
+                  <span className="text-coffee-cream mt-6">to</span>
+                  <div>
+                    <label className="block font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream mb-1.5">Until</label>
+                    <input 
+                      type="number" 
+                      min="1" 
+                      max="24" 
+                      value={remSleep} 
+                      onChange={(e) => setRemSleep(+e.target.value)}
+                      disabled={!remEnabled}
+                      className="w-20 p-3 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:ring-2 focus:ring-maple-rust/25 focus:border-maple-rust font-body disabled:opacity-50"
+                    />
+                    <span className="ml-2 font-body text-sm text-coffee-cream">:00</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-3 pt-6">
+                <button 
+                  onClick={saveReminderSettings} 
+                  disabled={saving} 
+                  className="flex items-center gap-2 bg-maple-rust text-page-cream px-6 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-colors disabled:opacity-50"
+                >
+                  <Save size={16} /> {saving ? 'Saving...' : 'Save Reminder Settings'}
+                </button>
+                <button 
+                  onClick={enableBrowserNotifs} 
+                  disabled={remBrowser}
+                  className="flex items-center gap-2 border border-yale-blue text-yale-blue px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue hover:text-page-cream transition-colors disabled:opacity-50"
+                >
+                  <Bell size={16} /> {remBrowser ? 'Browser Enabled' : 'Enable Browser Notifications'}
+                </button>
+                <button 
+                  onClick={testReminder} 
+                  disabled={saving}
+                  className="flex items-center gap-2 border border-porch-sage text-porch-sage px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-porch-sage hover:text-page-cream transition-colors disabled:opacity-50"
+                >
+                  <Bell size={16} /> Send Test Email
+                </button>
+              </div>
+
+              <div className="pt-6 border-t border-coffee-cream/20">
+                <p className="font-body text-xs text-coffee-cream italic">
+                  📬 Emails include your current streak, today's goal progress, and pending tasks. If you've already won the day (all tasks done + goal met), we skip the email.
+                </p>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'privacy' && (
             <div className="space-y-6">
               <h2 className="font-display text-2xl text-yale-blue mb-4">Privacy & Security</h2>
@@ -325,7 +513,7 @@ export default function Settings() {
             </div>
           )}
 
-                    {activeTab === 'appearance' && (
+          {activeTab === 'appearance' && (
             <div className="space-y-6">
               <h2 className="font-display text-2xl text-yale-blue mb-1">Appearance</h2>
               <p className="font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream mb-3">
@@ -358,7 +546,6 @@ export default function Settings() {
                 ))}
               </div>
 
-              {/* ✅ Save Button Added Back */}
               <button 
                 onClick={handleSaveProfile} 
                 disabled={saving} 

@@ -4,13 +4,14 @@ import { FocusTimerProvider } from './context/FocusTimerContext';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import WeeklyReport from './pages/WeeklyReport';
+import FocusZone from './components/FocusZone';
 
-// ⚡ Imports immédiats (auth flow + layout — critiques au démarrage)
+// ⚡ Immediate imports (auth flow + layout — critical at startup)
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import ForgotPassword from './pages/ForgotPassword';
 
-// ⚡ Lazy imports — chaque page devient son propre bundle, chargé à la demande
+// ⚡ Lazy imports — each page becomes its own bundle, loaded on demand
 const Dashboard      = lazy(() => import('./pages/Dashboard'));
 const Library        = lazy(() => import('./pages/Library'));
 const Tasks          = lazy(() => import('./pages/Tasks'));
@@ -51,6 +52,8 @@ function App() {
             <Route path="/" element={
               <ProtectedRoute>
                 <Layout />
+                {/* 🎵 Focus Zone — floating overlay on every authenticated page */}
+                <FocusZone />
               </ProtectedRoute>
             }>
               <Route index element={<Navigate to="/dashboard" replace />} />
@@ -70,7 +73,7 @@ function App() {
               <Route path="study-materials/:materialId" element={<StudyMaterials />} />
               <Route path="study-materials/:materialId/chapter/:chapterId" element={<ChapterDetail />} />
               <Route path="history" element={<History />} />
-              <Route path="/weekly-report" element={<WeeklyReport />} />
+              <Route path="weekly-report" element={<WeeklyReport />} />
             </Route>
           </Routes>
         </Suspense>

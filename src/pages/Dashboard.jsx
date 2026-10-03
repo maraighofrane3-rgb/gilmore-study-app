@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useFocusTimer } from '../context/FocusTimerContext';
 import { lazy, Suspense } from 'react';
 const DailyCoach = lazy(() => import('../components/DailyCoach'));
+import { ensureReminderRow, syncReminderSnapshot, maybeShowLocalReminder } from '../utils/reminders';
 import {
   Play, Plus, PenLine, Upload, CheckCircle, Circle,
   CalendarDays, ChevronRight,
@@ -59,24 +60,61 @@ export default function Dashboard() {
   const todayKey = keyOf(today);
 
   useEffect(() => {
-    if (!user) return;
-    let mounted = true;
-    const loadData = async () => {
-      const [tasksRes, sessionsRes, profileRes] = await Promise.all([
-        // Only fetch the exact columns the Dashboard needs!
-        supabase.from('tasks').select('id, title, status, due_date').eq('user_id', user.id),
-        supabase.from('pomodoro_sessions').select('duration').eq('user_id', user.id).eq('completed', true).gte('created_at', `${todayKey}T00:00:00`),
-        supabase.from('profiles').select('daily_goal_hours').eq('id', user.id).maybeSingle(),
-      ]);
-      if (!mounted) return;
-      setTasks(tasksRes.data || []);
-      setTodayMinutes((sessionsRes.data || []).reduce((s, r) => s + (r.duration || 0), 0));
-      setGoalHours(profileRes.data?.daily_goal_hours || 6);
-      setLoading(false);
+  if (!user) return;
+  let mounted = true;
+  const loadData = async () => {
+    const [tasksRes, sessionsRes, profileRes, streakRes] = await Promise.all([
+      // Only fetch the exact columns the Dashboard needs!
+      supabase.from('tasks').select('id, title, status, due_date').eq('user_id', user.id),
+      supabase.from('pomodoro_sessions').select('duration').eq('user_id', user.id).eq('completed', true).gte('created_at', `${todayKey}T00:00:00`),
+      supabase.from('profiles').select('daily_goal_hours, current_streak').eq('id', user.id).maybeSingle(),
+      // Add streak calculation if you track it separately
+      supabase.from('focus_sessions')
+        .select('date')
+        .eq('user_id', user.id)
+        .eq('completed', true)
+        .order('date', { ascending: false })
+        .limit(30),
+    ]);
+    if (!mounted) return;
+    
+    const tasks = tasksRes.data || [];
+    const todayMinutes = (sessionsRes.data || []).reduce((s, r) => s + (r.duration || 0), 0);
+    const goalHours = profileRes.data?.daily_goal_hours || 6;
+    const streak = profileRes.data?.current_streak || 0;
+    
+    setTasks(tasks);
+    setTodayMinutes(todayMinutes);
+    setGoalHours(goalHours);
+    setLoading(false);
+
+    // 🔔 Sync reminder system
+    await ensureReminderRow();
+    
+    const todayTasks = tasks.filter(t => {
+      if (!t.due_date) return true; // No due date = today
+      const dueDate = new Date(t.due_date).toISOString().slice(0, 10);
+      return dueDate === todayKey;
+    });
+    
+    const snapshot = {
+      goalHours,
+      focusedMinutes: todayMinutes,
+      streak,
+      tasksDue: todayTasks.filter(t => t.status !== 'completed').length,
+      tasksDone: todayTasks.filter(t => t.status === 'completed').length,
+      taskList: todayTasks
+        .filter(t => t.status !== 'completed')
+        .map(t => t.title)
+        .join('\n'),
     };
-    loadData();
+    
+    await syncReminderSnapshot(snapshot);
+    maybeShowLocalReminder(snapshot);
+  };
+  loadData();
     return () => { mounted = false; };
-  }, [user, todayKey, completedAt]);
+}, [user, todayKey, completedAt]);
 
   const toggleTask = async (task) => {
     const newStatus = task.status === 'done' ? 'todo' : 'done';
