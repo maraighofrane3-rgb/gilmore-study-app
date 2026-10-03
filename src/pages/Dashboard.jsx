@@ -59,62 +59,73 @@ export default function Dashboard() {
   const today = new Date();
   const todayKey = keyOf(today);
 
-  useEffect(() => {
-  if (!user) return;
-  let mounted = true;
-  const loadData = async () => {
-    const [tasksRes, sessionsRes, profileRes, streakRes] = await Promise.all([
-      // Only fetch the exact columns the Dashboard needs!
-      supabase.from('tasks').select('id, title, status, due_date').eq('user_id', user.id),
-      supabase.from('pomodoro_sessions').select('duration').eq('user_id', user.id).eq('completed', true).gte('created_at', `${todayKey}T00:00:00`),
-      supabase.from('profiles').select('daily_goal_hours, current_streak').eq('id', user.id).maybeSingle(),
-      // Add streak calculation if you track it separately
-      supabase.from('focus_sessions')
-        .select('date')
-        .eq('user_id', user.id)
-        .eq('completed', true)
-        .order('date', { ascending: false })
-        .limit(30),
-    ]);
-    if (!mounted) return;
-    
-    const tasks = tasksRes.data || [];
-    const todayMinutes = (sessionsRes.data || []).reduce((s, r) => s + (r.duration || 0), 0);
-    const goalHours = profileRes.data?.daily_goal_hours || 6;
-    const streak = profileRes.data?.current_streak || 0;
-    
-    setTasks(tasks);
-    setTodayMinutes(todayMinutes);
-    setGoalHours(goalHours);
-    setLoading(false);
+    useEffect(() => {
+    if (!user) return;
+    let mounted = true;
+    const loadData = async () => {
+      const sixtyDaysAgo = new Date(Date.now() - 60 * 86400e3).toISOString().slice(0, 10);
+      
+      const [tasksRes, sessionsRes, profileRes, streakRes] = await Promise.all([
+        supabase.from('tasks').select('id, title, status, due_date').eq('user_id', user.id),
+        supabase.from('pomodoro_sessions').select('duration').eq('user_id', user.id).eq('completed', true).gte('created_at', `${todayKey}T00:00:00`),
+        supabase.from('profiles').select('daily_goal_hours').eq('id', user.id).maybeSingle(),
+        // 🔥 Streak: completed sessions over the last 60 days
+        supabase.from('pomodoro_sessions')
+          .select('created_at')
+          .eq('user_id', user.id)
+          .eq('completed', true)
+          .gte('created_at', `${sixtyDaysAgo}T00:00:00`)
+          .order('created_at', { ascending: false })
+          .limit(2000),
+      ]);
+      if (!mounted) return;
+      
+      const tasks = tasksRes.data || [];
+      const todayMinutes = (sessionsRes.data || []).reduce((s, r) => s + (r.duration || 0), 0);
+      const goalHours = profileRes.data?.daily_goal_hours || 6;
+      
+      // Compute streak from session days
+      const activeDays = new Set((streakRes.data || []).map(s => s.created_at.slice(0, 10)));
+      let streak = 0;
+      for (let i = 0; i <= 60; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        if (activeDays.has(d.toISOString().slice(0, 10))) streak++;
+        else if (i > 0) break;
+      }
+      
+      setTasks(tasks);
+      setTodayMinutes(todayMinutes);
+      setGoalHours(goalHours);
+      setLoading(false);
 
-    // 🔔 Sync reminder system
-    await ensureReminderRow();
-    
-    const todayTasks = tasks.filter(t => {
-      if (!t.due_date) return true; // No due date = today
-      const dueDate = new Date(t.due_date).toISOString().slice(0, 10);
-      return dueDate === todayKey;
-    });
-    
-    const snapshot = {
-      goalHours,
-      focusedMinutes: todayMinutes,
-      streak,
-      tasksDue: todayTasks.filter(t => t.status !== 'completed').length,
-      tasksDone: todayTasks.filter(t => t.status === 'completed').length,
-      taskList: todayTasks
-        .filter(t => t.status !== 'completed')
-        .map(t => t.title)
-        .join('\n'),
+      // 🔔 Sync reminder system
+      await ensureReminderRow();
+      
+      const todayTasks = tasks.filter(t => {
+        if (!t.due_date) return true;
+        const dueDate = new Date(t.due_date).toISOString().slice(0, 10);
+        return dueDate === todayKey;
+      });
+      
+      const snapshot = {
+        goalHours,
+        focusedMinutes: todayMinutes,
+        streak,
+        tasksDue: todayTasks.filter(t => t.status !== 'completed').length,
+        tasksDone: todayTasks.filter(t => t.status === 'completed').length,
+        taskList: todayTasks
+          .filter(t => t.status !== 'completed')
+          .map(t => t.title)
+          .join('\n'),
+      };
+      
+      await syncReminderSnapshot(snapshot);
+      maybeShowLocalReminder(snapshot);
     };
-    
-    await syncReminderSnapshot(snapshot);
-    maybeShowLocalReminder(snapshot);
-  };
-  loadData();
+    loadData();
     return () => { mounted = false; };
-}, [user, todayKey, completedAt]);
+  }, [user, todayKey, completedAt]);
 
   const toggleTask = async (task) => {
     const newStatus = task.status === 'done' ? 'todo' : 'done';
