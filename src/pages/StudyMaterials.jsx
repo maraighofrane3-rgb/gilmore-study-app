@@ -250,6 +250,55 @@ export default function StudyMaterials() {
   const chaptersList = chapters.filter(c => (c.category || 'chapter') === 'chapter');
   const exercisesList = chapters.filter(c => c.category === 'exercise');
 
+  // 📄 Shared PDF import form (rendered inside whichever section triggered it)
+  const renderPdfForm = () => (
+    <form onSubmit={handlePDFSubmit} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
+      <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream">1. Select PDF Document</label>
+      <input
+        type="file"
+        accept=".pdf,application/pdf"
+        onChange={handleFileSelect}
+        disabled={uploadingPDF}
+        className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+      />
+      {pdfFile && (
+        <div className="animate-fade-in-up">
+          <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-1">2. Title (Editable)</label>
+          <input
+            type="text"
+            value={pdfTitle}
+            onChange={(e) => setPdfTitle(e.target.value)}
+            placeholder="Enter title"
+            disabled={uploadingPDF}
+            className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+          />
+        </div>
+      )}
+      {uploadingPDF && (
+        <div className="flex items-center gap-2 text-coffee-cream text-sm">
+          <Loader2 size={14} className="animate-spin" />
+          Extracting text from PDF...
+        </div>
+      )}
+      <div className="flex gap-2 pt-2">
+        <button
+          type="submit"
+          disabled={!pdfFile || uploadingPDF}
+          className="flex-1 bg-maple-rust text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {uploadingPDF ? 'Processing...' : 'Import PDF'}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setShowPDFUpload(false); setPdfFile(null); setPdfTitle(''); }}
+          className="px-3 py-2 text-coffee-cream hover:text-maple-rust text-sm"
+        >
+          <X size={16} />
+        </button>
+      </div>
+    </form>
+  );
+
   if (loading) {
     return (
       <div className="max-w-6xl mx-auto py-20 text-center">
@@ -259,7 +308,7 @@ export default function StudyMaterials() {
     );
   }
 
-  if (selectedMaterial) {
+    if (selectedMaterial) {
     return (
       <div className="max-w-6xl mx-auto space-y-8 animate-fade-in-up">
         {notification.show && (
@@ -290,232 +339,176 @@ export default function StudyMaterials() {
           {selectedMaterial.description && <p className="font-body text-coffee-cream">{selectedMaterial.description}</p>}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column: Chapters & Exercises */}
-          <div className="space-y-8">
-            
-            {/* 📖 CHAPTERS & LECTURES SECTION */}
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <h2 className="font-display text-lg text-yale-blue flex items-center gap-2">
-                  <BookOpen size={20} className="text-maple-rust" /> Chapters & Lectures
-                </h2>
+        {/* 📚 Two shelves, full width — no dead placeholder */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+
+          {/* ── 📖 CHAPTERS & LECTURES ── */}
+          <section className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="font-display text-lg text-yale-blue flex items-center gap-2">
+                <BookOpen size={20} className="text-maple-rust" />
+                Chapters & Lectures
+                <span className="font-label text-[0.6rem] text-coffee-cream bg-page-cream border border-coffee-cream/20 px-2 py-0.5 rounded-full">
+                  {chaptersList.length}
+                </span>
+              </h2>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => { setShowPDFUpload(!showPDFUpload); setPdfCategory('chapter'); setShowExerciseForm(false); }} 
+                  className="text-maple-rust hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
+                >
+                  <Upload size={14} /> Import PDF
+                </button>
+                <button 
+                  onClick={() => { setShowChapterForm(!showChapterForm); setShowPDFUpload(false); }} 
+                  className="text-maple-rust hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
+                >
+                  <Plus size={14} /> Add
+                </button>
+              </div>
+            </div>
+
+            {showPDFUpload && pdfCategory === 'chapter' && renderPdfForm()}
+
+            {showChapterForm && (
+              <form onSubmit={handleAddChapter} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
+                <input 
+                  type="text" required value={newChapter.title} 
+                  onChange={(e) => setNewChapter({...newChapter, title: e.target.value})} 
+                  placeholder="Chapter Title" 
+                  className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm" 
+                />
+                <textarea 
+                  value={newChapter.content} 
+                  onChange={(e) => setNewChapter({...newChapter, content: e.target.value})} 
+                  placeholder="Chapter Content..." 
+                  className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm h-32 resize-none" 
+                />
                 <div className="flex gap-2">
-                  <button 
-                    onClick={() => { setShowPDFUpload(!showPDFUpload); setPdfCategory('chapter'); }} 
-                    className="text-maple-rust hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
-                  >
-                    <Upload size={14} /> Import PDF
-                  </button>
-                  <button 
-                    onClick={() => setShowChapterForm(!showChapterForm)} 
-                    className="text-maple-rust hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
-                  >
-                    <Plus size={14} /> Add
-                  </button>
+                  <button type="submit" className="flex-1 bg-maple-rust text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all">Save Chapter</button>
+                  <button type="button" onClick={() => setShowChapterForm(false)} className="px-3 py-2 text-coffee-cream hover:text-maple-rust"><X size={16} /></button>
                 </div>
-              </div>
+              </form>
+            )}
 
-              {/* PDF Upload Form */}
-              {showPDFUpload && (
-                <form onSubmit={handlePDFSubmit} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
-                  <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream">1. Select PDF Document</label>
-                  <input
-                    type="file"
-                    accept=".pdf,application/pdf"
-                    onChange={handleFileSelect}
-                    disabled={uploadingPDF}
-                    className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
-                  />
-                  
-                  {pdfFile && (
-                    <div className="animate-fade-in-up">
-                      <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream mb-1">2. Title (Editable)</label>
-                      <input
-                        type="text"
-                        value={pdfTitle}
-                        onChange={(e) => setPdfTitle(e.target.value)}
-                        placeholder="Enter title"
-                        disabled={uploadingPDF}
-                        className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
-                      />
-                    </div>
-                  )}
-
-                  {uploadingPDF && (
-                    <div className="flex items-center gap-2 text-coffee-cream text-sm">
-                      <Loader2 size={14} className="animate-spin" />
-                      Extracting text from PDF...
-                    </div>
-                  )}
-                  
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      type="submit"
-                      disabled={!pdfFile || uploadingPDF}
-                      className="flex-1 bg-maple-rust text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {uploadingPDF ? 'Processing...' : 'Import PDF'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setShowPDFUpload(false); setPdfFile(null); setPdfTitle(''); }}
-                      className="px-3 py-2 text-coffee-cream hover:text-maple-rust text-sm"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {/* Manual Chapter Form */}
-              {showChapterForm && (
-                <form onSubmit={handleAddChapter} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
-                  <input 
-                    type="text" 
-                    required 
-                    value={newChapter.title} 
-                    onChange={(e) => setNewChapter({...newChapter, title: e.target.value})} 
-                    placeholder="Chapter Title" 
-                    className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm" 
-                  />
-                  <textarea 
-                    value={newChapter.content} 
-                    onChange={(e) => setNewChapter({...newChapter, content: e.target.value})} 
-                    placeholder="Chapter Content..." 
-                    className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm h-32 resize-none" 
-                  />
-                  <div className="flex gap-2">
-                    <button type="submit" className="flex-1 bg-maple-rust text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all">Save Chapter</button>
-                    <button type="button" onClick={() => setShowChapterForm(false)} className="px-3 py-2 text-coffee-cream hover:text-maple-rust"><X size={16} /></button>
-                  </div>
-                </form>
-              )}
-
-              {/* Chapters List */}
-              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
-                {chaptersList.length === 0 ? (
-                  <p className="text-center text-coffee-cream italic py-4 text-sm">No chapters yet.</p>
-                ) : (
-                  chaptersList.map((chapter) => (
-                    <div 
-                      key={chapter.id} 
-                      onClick={() => navigate(`/study-materials/${selectedMaterial.id}/chapter/${chapter.id}`)} 
-                      className="p-4 rounded-sm border cursor-pointer transition-all group bg-parchment border-coffee-cream/20 hover:border-maple-rust/50"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            {chapter.is_from_pdf && <FileIcon size={14} className="text-maple-rust" />}
-                            <h4 className="font-body text-sm font-medium text-library-ink group-hover:text-maple-rust transition-colors">{chapter.title}</h4>
-                            <span className="font-label text-[0.55rem] uppercase tracking-wider px-1.5 py-0.5 rounded-sm border border-maple-rust/30 text-maple-rust">
-                              Chapter
-                            </span>
-                          </div>
-                          <p className="font-label text-[0.6rem] text-coffee-cream">{new Date(chapter.created_at).toLocaleDateString()}</p>
+            <div className="space-y-2 max-h-[560px] overflow-y-auto pr-2">
+              {chaptersList.length === 0 ? (
+                <div className="border border-dashed border-coffee-cream/30 rounded-sm p-8 text-center">
+                  <BookOpen size={28} className="mx-auto mb-3 text-coffee-cream/40" />
+                  <p className="text-coffee-cream italic text-sm">No chapters yet — import a PDF or add one by hand.</p>
+                </div>
+              ) : (
+                chaptersList.map((chapter) => (
+                  <div 
+                    key={chapter.id} 
+                    onClick={() => navigate(`/study-materials/${selectedMaterial.id}/chapter/${chapter.id}`)} 
+                    className="p-4 rounded-sm border cursor-pointer transition-all group bg-parchment border-coffee-cream/20 hover:border-maple-rust/60 hover:shadow-cozy"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          {chapter.is_from_pdf && <FileIcon size={14} className="text-maple-rust" />}
+                          <h4 className="font-body text-sm font-medium text-library-ink group-hover:text-maple-rust transition-colors">{chapter.title}</h4>
+                          <span className="font-label text-[0.55rem] uppercase tracking-wider px-1.5 py-0.5 rounded-sm border border-maple-rust/30 text-maple-rust">Chapter</span>
                         </div>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); deleteChapter(chapter.id); }} 
-                          className="text-coffee-cream/40 hover:text-maple-rust opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <p className="font-label text-[0.6rem] text-coffee-cream">{new Date(chapter.created_at).toLocaleDateString()}</p>
                       </div>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); deleteChapter(chapter.id); }} 
+                        className="text-coffee-cream/40 hover:text-maple-rust opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
-                  ))
-                )}
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          {/* ── ✍️ EXERCISES & TESTS ── */}
+          <section className="space-y-4 lg:border-l lg:border-coffee-cream/20 lg:pl-8">
+            <div className="flex justify-between items-center">
+              <h2 className="font-display text-lg text-yale-blue flex items-center gap-2">
+                <PenTool size={20} className="text-porch-sage" />
+                Exercises & Tests
+                <span className="font-label text-[0.6rem] text-coffee-cream bg-page-cream border border-coffee-cream/20 px-2 py-0.5 rounded-full">
+                  {exercisesList.length}
+                </span>
+              </h2>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => { setShowPDFUpload(!showPDFUpload); setPdfCategory('exercise'); setShowChapterForm(false); }} 
+                  className="text-porch-sage hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
+                >
+                  <Upload size={14} /> Import PDF
+                </button>
+                <button 
+                  onClick={() => { setShowExerciseForm(!showExerciseForm); setShowPDFUpload(false); }} 
+                  className="text-porch-sage hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
+                >
+                  <Plus size={14} /> Add
+                </button>
               </div>
             </div>
 
-            {/* ✍️ EXERCISES & TESTS SECTION */}
-            <div className="space-y-4 pt-6 border-t border-coffee-cream/20">
-              <div className="flex justify-between items-center">
-                <h2 className="font-display text-lg text-yale-blue flex items-center gap-2">
-                  <PenTool size={20} className="text-porch-sage" /> Exercises & Tests
-                </h2>
+            {showPDFUpload && pdfCategory === 'exercise' && renderPdfForm()}
+
+            {showExerciseForm && (
+              <form onSubmit={handleAddExercise} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
+                <input 
+                  type="text" required value={newExercise.title} 
+                  onChange={(e) => setNewExercise({...newExercise, title: e.target.value})} 
+                  placeholder="Exercise Title (e.g., TD 3, Exam 2024)" 
+                  className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm" 
+                />
+                <textarea 
+                  value={newExercise.content} 
+                  onChange={(e) => setNewExercise({...newExercise, content: e.target.value})} 
+                  placeholder="Exercise instructions or content..." 
+                  className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm h-32 resize-none" 
+                />
                 <div className="flex gap-2">
-                  <button 
-                    onClick={() => { setShowPDFUpload(!showPDFUpload); setPdfCategory('exercise'); }} 
-                    className="text-porch-sage hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
-                  >
-                    <Upload size={14} /> Import PDF
-                  </button>
-                  <button 
-                    onClick={() => setShowExerciseForm(!showExerciseForm)} 
-                    className="text-porch-sage hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
-                  >
-                    <Plus size={14} /> Add
-                  </button>
+                  <button type="submit" className="flex-1 bg-porch-sage text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all">Save Exercise</button>
+                  <button type="button" onClick={() => setShowExerciseForm(false)} className="px-3 py-2 text-coffee-cream hover:text-maple-rust"><X size={16} /></button>
                 </div>
-              </div>
+              </form>
+            )}
 
-              {/* Manual Exercise Form */}
-              {showExerciseForm && (
-                <form onSubmit={handleAddExercise} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
-                  <input 
-                    type="text" 
-                    required 
-                    value={newExercise.title} 
-                    onChange={(e) => setNewExercise({...newExercise, title: e.target.value})} 
-                    placeholder="Exercise Title (e.g., TD 3, Exam 2024)" 
-                    className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm" 
-                  />
-                  <textarea 
-                    value={newExercise.content} 
-                    onChange={(e) => setNewExercise({...newExercise, content: e.target.value})} 
-                    placeholder="Exercise instructions or content..." 
-                    className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm h-32 resize-none" 
-                  />
-                  <div className="flex gap-2">
-                    <button type="submit" className="flex-1 bg-porch-sage text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all">Save Exercise</button>
-                    <button type="button" onClick={() => setShowExerciseForm(false)} className="px-3 py-2 text-coffee-cream hover:text-maple-rust"><X size={16} /></button>
-                  </div>
-                </form>
-              )}
-
-              {/* Exercises List */}
-              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
-                {exercisesList.length === 0 ? (
-                  <p className="text-center text-coffee-cream italic py-4 text-sm">No exercises yet.</p>
-                ) : (
-                  exercisesList.map((exercise) => (
-                    <div 
-                      key={exercise.id} 
-                      onClick={() => navigate(`/study-materials/${selectedMaterial.id}/exercise/${exercise.id}`)} 
-                      className="p-4 rounded-sm border cursor-pointer transition-all group bg-parchment border-coffee-cream/20 hover:border-porch-sage/50"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            {exercise.is_from_pdf && <FileIcon size={14} className="text-porch-sage" />}
-                            <h4 className="font-body text-sm font-medium text-library-ink group-hover:text-porch-sage transition-colors">{exercise.title}</h4>
-                            <span className="font-label text-[0.55rem] uppercase tracking-wider px-1.5 py-0.5 rounded-sm border border-porch-sage/30 text-porch-sage">
-                              Exercise
-                            </span>
-                          </div>
-                          <p className="font-label text-[0.6rem] text-coffee-cream">{new Date(exercise.created_at).toLocaleDateString()}</p>
+            <div className="space-y-2 max-h-[560px] overflow-y-auto pr-2">
+              {exercisesList.length === 0 ? (
+                <div className="border border-dashed border-coffee-cream/30 rounded-sm p-8 text-center">
+                  <PenTool size={28} className="mx-auto mb-3 text-coffee-cream/40" />
+                  <p className="text-coffee-cream italic text-sm">No exercises yet — import a TD/exam PDF or scan your paper sheets inside.</p>
+                </div>
+              ) : (
+                exercisesList.map((exercise) => (
+                  <div 
+                    key={exercise.id} 
+                    onClick={() => navigate(`/study-materials/${selectedMaterial.id}/exercise/${exercise.id}`)} 
+                    className="p-4 rounded-sm border cursor-pointer transition-all group bg-parchment border-coffee-cream/20 hover:border-porch-sage/60 hover:shadow-cozy"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          {exercise.is_from_pdf && <FileIcon size={14} className="text-porch-sage" />}
+                          <h4 className="font-body text-sm font-medium text-library-ink group-hover:text-porch-sage transition-colors">{exercise.title}</h4>
+                          <span className="font-label text-[0.55rem] uppercase tracking-wider px-1.5 py-0.5 rounded-sm border border-porch-sage/30 text-porch-sage">Exercise</span>
                         </div>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); deleteChapter(exercise.id); }} 
-                          className="text-coffee-cream/40 hover:text-maple-rust opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <p className="font-label text-[0.6rem] text-coffee-cream">{new Date(exercise.created_at).toLocaleDateString()}</p>
                       </div>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); deleteChapter(exercise.id); }} 
+                        className="text-coffee-cream/40 hover:text-maple-rust opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
-                  ))
-                )}
-              </div>
+                  </div>
+                ))
+              )}
             </div>
-          </div>
-
-          {/* Right Column: Placeholder */}
-          <div className="lg:col-span-2">
-            <div className="text-center text-coffee-cream italic py-20 bg-parchment/50 rounded-sm border border-coffee-cream/20 h-full flex flex-col items-center justify-center">
-              <BookOpen size={48} className="mx-auto mb-4 opacity-30" />
-              <p>Select a chapter or exercise to open it in the detailed view.</p>
-            </div>
-          </div>
+          </section>
         </div>
       </div>
     );
