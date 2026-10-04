@@ -14,6 +14,7 @@ const TABS = [
   { id: 'appearance', label: 'Appearance', icon: Palette },
 ];
 
+// ✅ 1. Added 'custom' to the themes array
 const THEMES = [
   { id: 'paper', label: 'Paper', tagline: 'Stars Hollow, autumn afternoon', swatch: ['#F3EAD8', '#132A44', '#A13D2B', '#C9A227'] },
   { id: 'midnight', label: 'Midnight', tagline: 'Reading under the blanket', swatch: ['#171B26', '#F5E6C8', '#E08659', '#D9B15C'] },
@@ -21,11 +22,14 @@ const THEMES = [
   { id: 'cream', label: 'Cream', tagline: 'Sunlit morning at the counter', swatch: ['#FBF6EC', '#2F4F63', '#B85C3E', '#D4B15C'] },
   { id: 'harvard', label: 'Harvard', tagline: 'Crimson ink on ivory pages', swatch: ['#F7F2E9', '#7D1128', '#A51C30', '#A9822E'] },
   { id: 'vampire', label: 'Vampire', tagline: 'Bordeaux ink on midnight vellum', swatch: ['#121114', '#C6B3A0', '#8F2A3A', '#611220'] },
+  { id: 'custom', label: 'Custom', tagline: 'Your own palette', swatch: ['#F3EAD8', '#132A44', '#A13D2B', '#C9A227'] },
 ];
 
 export default function Settings() {
   const { user } = useAuth();
-  const { theme, setTheme } = useTheme();
+  // ✅ 2. Destructure customColors and setCustomColors
+  const { theme, setTheme, customColors, setCustomColors } = useTheme();
+  
   const [activeTab, setActiveTab] = useState('account');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -95,7 +99,7 @@ export default function Settings() {
     setLoading(false);
   };
 
-  const handleSaveProfile = async (e) => {
+    const handleSaveProfile = async (e) => {
     e.preventDefault();
     setSaving(true);
     setMessage({ type: '', text: '' });
@@ -111,6 +115,11 @@ export default function Settings() {
       updated_at: new Date().toISOString()
     };
 
+    // ✅ Sync custom colors to DB if 'custom' theme is active
+    if (profile.theme === 'custom') {
+      updates.custom_theme = customColors;
+    }
+
     const { data, error } = await supabase
       .from('profiles')
       .update(updates)
@@ -119,7 +128,7 @@ export default function Settings() {
     if (error) {
       setMessage({ type: 'error', text: `Failed to save: ${error.message}` });
     } else {
-      setMessage({ type: 'success', text: 'Settings saved successfully.' });
+      setMessage({ type: 'success', text: 'Settings saved successfully across all your devices.' });
     }
     setSaving(false);
   };
@@ -235,7 +244,8 @@ export default function Settings() {
         <div className={`p-4 rounded-sm border flex items-center gap-2 font-label text-xs ${
           message.type === 'success' ? 'bg-porch-sage/10 border-porch-sage/30 text-porch-sage' : 'bg-maple-rust/10 border-maple-rust/30 text-maple-rust'
         }`}>
-          <CheckCircle size={16} /> {message.text}
+          {message.type === 'success' ? <CheckCircle size={16} /> : <AlertTriangle size={16} />} 
+          {message.text}
         </div>
       )}
 
@@ -443,18 +453,17 @@ export default function Settings() {
                     type="checkbox"
                     checked={profile.email_notifications}
                     onChange={async (e) => {
-  const newValue = e.target.checked;
-  setProfile(prev => ({ ...prev, email_notifications: newValue }));
-  const { error } = await supabase.from('profiles').update({ email_notifications: newValue }).eq('id', user.id);
-  // 🔔 Master switch → sync the reminder pipeline's own table
-  await supabase.from('reminder_settings').update({ email_notifications: newValue }).eq('user_id', user.id);
-  if (error) {
-    setProfile(prev => ({ ...prev, email_notifications: !newValue }));
-    setMessage({ type: 'error', text: 'Failed to update preferences.' });
-  } else {
-    setMessage({ type: 'success', text: newValue ? 'Email reminders ON.' : 'Email reminders OFF — the 3h emails will stop.' });
-  }
-}}
+                      const newValue = e.target.checked;
+                      setProfile(prev => ({ ...prev, email_notifications: newValue }));
+                      const { error } = await supabase.from('profiles').update({ email_notifications: newValue }).eq('id', user.id);
+                      await supabase.from('reminder_settings').update({ email_notifications: newValue }).eq('user_id', user.id);
+                      if (error) {
+                        setProfile(prev => ({ ...prev, email_notifications: !newValue }));
+                        setMessage({ type: 'error', text: 'Failed to update preferences.' });
+                      } else {
+                        setMessage({ type: 'success', text: newValue ? 'Email reminders ON.' : 'Email reminders OFF — the 3h emails will stop.' });
+                      }
+                    }}
                     className="sr-only peer"
                   />
                   <div className="w-11 h-6 bg-coffee-cream/20 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-page-cream after:border-coffee-cream/30 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-maple-rust"></div>
@@ -473,26 +482,25 @@ export default function Settings() {
                     type="checkbox"
                     checked={profile.notifications_enabled}
                     onChange={async (e) => {
-  const newValue = e.target.checked;
-  if (newValue) {
-    const granted = await requestNotificationPermission();
-    if (!granted) {
-      setMessage({ type: 'error', text: 'Notification permission denied by browser.' });
-      return;
-    }
-  }
-  setProfile(prev => ({ ...prev, notifications_enabled: newValue }));
-  const { error } = await supabase.from('profiles').update({ notifications_enabled: newValue }).eq('id', user.id);
-  // 🔔 Master switch → sync reminder settings + remember browser choice
-  await supabase.from('reminder_settings').update({ browser_notifications: newValue }).eq('user_id', user.id);
-  if (error) {
-    setProfile(prev => ({ ...prev, notifications_enabled: !newValue }));
-    setMessage({ type: 'error', text: 'Failed to update preferences.' });
-  } else {
-    setRemBrowser(newValue);
-    setMessage({ type: 'success', text: newValue ? 'OS alerts ON while the app is open.' : 'OS alerts OFF.' });
-  }
-}}
+                      const newValue = e.target.checked;
+                      if (newValue) {
+                        const granted = await requestNotificationPermission();
+                        if (!granted) {
+                          setMessage({ type: 'error', text: 'Notification permission denied by browser.' });
+                          return;
+                        }
+                      }
+                      setProfile(prev => ({ ...prev, notifications_enabled: newValue }));
+                      const { error } = await supabase.from('profiles').update({ notifications_enabled: newValue }).eq('id', user.id);
+                      await supabase.from('reminder_settings').update({ browser_notifications: newValue }).eq('user_id', user.id);
+                      if (error) {
+                        setProfile(prev => ({ ...prev, notifications_enabled: !newValue }));
+                        setMessage({ type: 'error', text: 'Failed to update preferences.' });
+                      } else {
+                        setRemBrowser(newValue);
+                        setMessage({ type: 'success', text: newValue ? 'OS alerts ON while the app is open.' : 'OS alerts OFF.' });
+                      }
+                    }}
                     className="sr-only peer"
                   />
                   <div className="w-11 h-6 bg-coffee-cream/20 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-page-cream after:border-coffee-cream/30 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-maple-rust"></div>
@@ -551,6 +559,39 @@ export default function Settings() {
                 ))}
               </div>
 
+              {theme === 'custom' && (
+  <div className="mt-6 p-6 rounded-sm border border-maple-rust/30 bg-parchment/50 space-y-5">
+    <div>
+      <h3 className="font-display text-xl text-yale-blue">Main Colors</h3>
+      <p className="font-body text-sm text-coffee-cream mt-1">
+        Core interface colors
+      </p>
+    </div>
+    
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
+      <ColorPicker label="Background" value={customColors.bg} onChange={(v) => setCustomColors(prev => ({ ...prev, bg: v }))} />
+      <ColorPicker label="Surface" value={customColors.surface} onChange={(v) => setCustomColors(prev => ({ ...prev, surface: v }))} />
+      <ColorPicker label="Text" value={customColors.text} onChange={(v) => setCustomColors(prev => ({ ...prev, text: v }))} />
+      <ColorPicker label="Heading" value={customColors.heading} onChange={(v) => setCustomColors(prev => ({ ...prev, heading: v }))} />
+      <ColorPicker label="Accent" value={customColors.accent} onChange={(v) => setCustomColors(prev => ({ ...prev, accent: v }))} />
+    </div>
+
+    {/* ✅ Sidebar Colors Section */}
+    <div className="pt-6 border-t border-coffee-cream/20">
+      <h3 className="font-display text-lg text-yale-blue mb-3">Sidebar Colors</h3>
+      <p className="font-body text-sm text-coffee-cream mb-4">
+        Customize the navigation sidebar independently
+      </p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        <ColorPicker label="Sidebar BG" value={customColors.sidebarBg} onChange={(v) => setCustomColors(prev => ({ ...prev, sidebarBg: v }))} />
+        <ColorPicker label="Sidebar Text" value={customColors.sidebarText} onChange={(v) => setCustomColors(prev => ({ ...prev, sidebarText: v }))} />
+        <ColorPicker label="Sidebar Muted" value={customColors.sidebarMuted} onChange={(v) => setCustomColors(prev => ({ ...prev, sidebarMuted: v }))} />
+        <ColorPicker label="Sidebar Accent" value={customColors.sidebarAccent} onChange={(v) => setCustomColors(prev => ({ ...prev, sidebarAccent: v }))} />
+      </div>
+    </div>
+  </div>
+)}
+
               <button 
                 onClick={handleSaveProfile} 
                 disabled={saving} 
@@ -601,6 +642,31 @@ export default function Settings() {
         confirmText={isDeleting ? "Deleting..." : "Yes, delete everything"}
         cancelText="Keep my account"
       />
+    </div>
+  );
+}
+
+// ✅ 4. Reusable Color Picker Component
+function ColorPicker({ label, value, onChange }) {
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <label className="font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream text-center">
+        {label}
+      </label>
+      <div className="relative group">
+        <input
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-14 h-14 rounded-sm border-2 border-coffee-cream/20 cursor-pointer 
+                     appearance-none bg-transparent p-0 
+                     hover:border-maple-rust transition-colors"
+          style={{ backgroundColor: value }}
+        />
+      </div>
+      <span className="font-mono text-[0.6rem] text-coffee-cream">
+        {value.toUpperCase()}
+      </span>
     </div>
   );
 }
