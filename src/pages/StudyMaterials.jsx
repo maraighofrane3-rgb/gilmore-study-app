@@ -6,7 +6,7 @@ import {
   BookOpen, Plus, Trash2, ArrowLeft, Loader2, 
   Sparkles, FileText, Lightbulb, List, X, ChevronRight,
   Save, CheckCircle, ChevronDown, Upload, FileText as FileIcon,
-  MessageCircle, Send, PenTool
+  MessageCircle, Send, PenTool, Image as ImageIcon
 } from 'lucide-react';
 
 export default function StudyMaterials() {
@@ -23,6 +23,13 @@ export default function StudyMaterials() {
   // Separate forms for chapters vs exercises
   const [showChapterForm, setShowChapterForm] = useState(false);
   const [showExerciseForm, setShowExerciseForm] = useState(false);
+  
+  // Scan states
+  const [showChapterScan, setShowChapterScan] = useState(false);
+  const [showExerciseScan, setShowExerciseScan] = useState(false);
+  const [scanFiles, setScanFiles] = useState([]);
+  const [scanTitle, setScanTitle] = useState('');
+  const [uploadingScans, setUploadingScans] = useState(false);
   
   const [showPDFUpload, setShowPDFUpload] = useState(false);
   const [uploadingPDF, setUploadingPDF] = useState(false);
@@ -96,6 +103,14 @@ export default function StudyMaterials() {
     }
   };
 
+  const handleScanFileSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    setScanFiles(files);
+    if (files.length > 0 && !scanTitle) {
+      setScanTitle(`Scanned Notes ${new Date().toLocaleDateString()}`);
+    }
+  };
+
   const handlePDFSubmit = async (e) => {
     e.preventDefault();
     if (!pdfFile) return;
@@ -132,7 +147,7 @@ export default function StudyMaterials() {
           file_path: fileName,
           is_from_pdf: true,
           has_images: true,
-          category: pdfCategory // 🆕 Pass the category
+          category: pdfCategory
         }])
         .select()
         .single();
@@ -146,7 +161,6 @@ export default function StudyMaterials() {
       
       showNotification(`PDF uploaded successfully! Text extracted for AI analysis.`);
       
-      // Navigate to the correct detail page based on category
       const route = pdfCategory === 'exercise' ? 'exercise' : 'chapter';
       navigate(`/study-materials/${selectedMaterial.id}/${route}/${data.id}`);
     } catch (err) {
@@ -154,6 +168,72 @@ export default function StudyMaterials() {
       showNotification(`Failed to upload PDF: ${err.message}`, 'error');
     }
     setUploadingPDF(false);
+  };
+
+  const handleScanUpload = async (category, e) => {
+    e.preventDefault();
+    if (scanFiles.length === 0) return;
+
+    setUploadingScans(true);
+    try {
+      // 1. Create a new chapter/exercise entry for these scans
+      const { data: docData, error: docError } = await supabase
+        .from('chapters')
+        .insert([{
+          user_id: user.id,
+          material_id: selectedMaterial.id,
+          title: scanTitle.trim() || `Scanned ${category}`,
+          content: '',
+          category: category,
+          is_from_pdf: false
+        }])
+        .select()
+        .single();
+
+      if (docError) throw docError;
+
+      // 2. Upload each image and link it to the new document
+      for (let i = 0; i < scanFiles.length; i++) {
+        const file = scanFiles[i];
+        const ext = file.name.split('.').pop().toLowerCase();
+        const path = `${user.id}/scans/${Date.now()}-${i}.${ext}`;
+        
+        const { error: upErr } = await supabase.storage
+          .from('scan-notes')
+          .upload(path, file);
+        
+        if (upErr) throw upErr;
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from('scan-notes')
+          .getPublicUrl(path);
+        
+        await supabase.from('doc_scans').insert([{
+          user_id: user.id,
+          doc_id: docData.id,
+          file_path: path,
+          public_url: publicUrl,
+          label: `Page ${i + 1}`,
+          position: i,
+        }]);
+      }
+      
+      showNotification(`${scanFiles.length} scan${scanFiles.length > 1 ? 's' : ''} uploaded successfully!`);
+      
+      // Reset state
+      setShowChapterScan(false);
+      setShowExerciseScan(false);
+      setScanFiles([]);
+      setScanTitle('');
+      
+      // Navigate to the newly created document
+      navigate(`/study-materials/${selectedMaterial.id}/${category}/${docData.id}`);
+      
+    } catch (err) {
+      console.error('Scan upload error:', err);
+      showNotification(`Failed to upload scans: ${err.message}`, 'error');
+    }
+    setUploadingScans(false);
   };
 
   const handleAddMaterial = async (e) => {
@@ -183,7 +263,7 @@ export default function StudyMaterials() {
         user_id: user.id, 
         material_id: selectedMaterial.id, 
         ...newChapter,
-        category: 'chapter' // 🆕 Explicit category
+        category: 'chapter'
       }])
       .select()
       .single();
@@ -207,7 +287,7 @@ export default function StudyMaterials() {
         user_id: user.id, 
         material_id: selectedMaterial.id, 
         ...newExercise,
-        category: 'exercise' // 🆕 Explicit category
+        category: 'exercise'
       }])
       .select()
       .single();
@@ -250,7 +330,7 @@ export default function StudyMaterials() {
   const chaptersList = chapters.filter(c => (c.category || 'chapter') === 'chapter');
   const exercisesList = chapters.filter(c => c.category === 'exercise');
 
-  // 📄 Shared PDF import form (rendered inside whichever section triggered it)
+  // 📄 Shared PDF import form
   const renderPdfForm = () => (
     <form onSubmit={handlePDFSubmit} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
       <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream">1. Select PDF Document</label>
@@ -299,6 +379,66 @@ export default function StudyMaterials() {
     </form>
   );
 
+  // 📷 Shared Scan form
+  const renderScanForm = (category) => (
+    <form onSubmit={(e) => handleScanUpload(category, e)} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
+      <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream">1. Select Images (photos of notes, exercises, etc.)</label>
+      <input
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={handleScanFileSelect}
+        disabled={uploadingScans}
+        className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+      />
+      {scanFiles.length > 0 && (
+        <div className="animate-fade-in-up space-y-2">
+          <label className="block font-label text-xs uppercase tracking-wider text-coffee-cream">2. Title (Optional)</label>
+          <input
+            type="text"
+            value={scanTitle}
+            onChange={(e) => setScanTitle(e.target.value)}
+            placeholder="e.g., TD 3 Solutions, Lecture Notes"
+            disabled={uploadingScans}
+            className="w-full p-2 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm"
+          />
+          <p className="font-body text-xs text-coffee-cream italic">
+            {scanFiles.length} file{scanFiles.length > 1 ? 's' : ''} selected. A new {category} will be created for these scans.
+          </p>
+        </div>
+      )}
+      {uploadingScans && (
+        <div className="flex items-center gap-2 text-coffee-cream text-sm">
+          <Loader2 size={14} className="animate-spin" />
+          Uploading scans...
+        </div>
+      )}
+      <div className="flex gap-2 pt-2">
+        <button
+          type="submit"
+          disabled={scanFiles.length === 0 || uploadingScans}
+          className={`flex-1 text-page-cream px-3 py-2 rounded-sm font-label text-xs uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+            category === 'chapter' ? 'bg-maple-rust hover:bg-yale-blue' : 'bg-porch-sage hover:bg-maple-rust'
+          }`}
+        >
+          {uploadingScans ? 'Uploading...' : 'Upload Scans'}
+        </button>
+        <button
+          type="button"
+          onClick={() => { 
+            if (category === 'chapter') setShowChapterScan(false); 
+            else setShowExerciseScan(false); 
+            setScanFiles([]); 
+            setScanTitle(''); 
+          }}
+          className="px-3 py-2 text-coffee-cream hover:text-maple-rust text-sm"
+        >
+          <X size={16} />
+        </button>
+      </div>
+    </form>
+  );
+
   if (loading) {
     return (
       <div className="max-w-6xl mx-auto py-20 text-center">
@@ -308,7 +448,7 @@ export default function StudyMaterials() {
     );
   }
 
-    if (selectedMaterial) {
+  if (selectedMaterial) {
     return (
       <div className="max-w-6xl mx-auto space-y-8 animate-fade-in-up">
         {notification.show && (
@@ -339,7 +479,7 @@ export default function StudyMaterials() {
           {selectedMaterial.description && <p className="font-body text-coffee-cream">{selectedMaterial.description}</p>}
         </div>
 
-        {/* 📚 Two shelves, full width — no dead placeholder */}
+        {/* 📚 Two shelves, full width */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 
           {/* ── 📖 CHAPTERS & LECTURES ── */}
@@ -354,13 +494,19 @@ export default function StudyMaterials() {
               </h2>
               <div className="flex gap-2">
                 <button 
-                  onClick={() => { setShowPDFUpload(!showPDFUpload); setPdfCategory('chapter'); setShowExerciseForm(false); }} 
+                  onClick={() => { setShowPDFUpload(!showPDFUpload); setPdfCategory('chapter'); setShowChapterForm(false); setShowChapterScan(false); }} 
                   className="text-maple-rust hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
                 >
                   <Upload size={14} /> Import PDF
                 </button>
                 <button 
-                  onClick={() => { setShowChapterForm(!showChapterForm); setShowPDFUpload(false); }} 
+                  onClick={() => { setShowChapterScan(!showChapterScan); setShowPDFUpload(false); setShowChapterForm(false); }} 
+                  className="text-maple-rust hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
+                >
+                  <ImageIcon size={14} /> Scan
+                </button>
+                <button 
+                  onClick={() => { setShowChapterForm(!showChapterForm); setShowPDFUpload(false); setShowChapterScan(false); }} 
                   className="text-maple-rust hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
                 >
                   <Plus size={14} /> Add
@@ -369,6 +515,7 @@ export default function StudyMaterials() {
             </div>
 
             {showPDFUpload && pdfCategory === 'chapter' && renderPdfForm()}
+            {showChapterScan && renderScanForm('chapter')}
 
             {showChapterForm && (
               <form onSubmit={handleAddChapter} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
@@ -395,7 +542,7 @@ export default function StudyMaterials() {
               {chaptersList.length === 0 ? (
                 <div className="border border-dashed border-coffee-cream/30 rounded-sm p-8 text-center">
                   <BookOpen size={28} className="mx-auto mb-3 text-coffee-cream/40" />
-                  <p className="text-coffee-cream italic text-sm">No chapters yet — import a PDF or add one by hand.</p>
+                  <p className="text-coffee-cream italic text-sm">No chapters yet — import a PDF, scan notes, or add one by hand.</p>
                 </div>
               ) : (
                 chaptersList.map((chapter) => (
@@ -438,13 +585,19 @@ export default function StudyMaterials() {
               </h2>
               <div className="flex gap-2">
                 <button 
-                  onClick={() => { setShowPDFUpload(!showPDFUpload); setPdfCategory('exercise'); setShowChapterForm(false); }} 
+                  onClick={() => { setShowPDFUpload(!showPDFUpload); setPdfCategory('exercise'); setShowExerciseForm(false); setShowExerciseScan(false); }} 
                   className="text-porch-sage hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
                 >
                   <Upload size={14} /> Import PDF
                 </button>
                 <button 
-                  onClick={() => { setShowExerciseForm(!showExerciseForm); setShowPDFUpload(false); }} 
+                  onClick={() => { setShowExerciseScan(!showExerciseScan); setShowPDFUpload(false); setShowExerciseForm(false); }} 
+                  className="text-porch-sage hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
+                >
+                  <ImageIcon size={14} /> Scan
+                </button>
+                <button 
+                  onClick={() => { setShowExerciseForm(!showExerciseForm); setShowPDFUpload(false); setShowExerciseScan(false); }} 
                   className="text-porch-sage hover:text-yale-blue font-label text-xs uppercase tracking-wider flex items-center gap-1"
                 >
                   <Plus size={14} /> Add
@@ -453,6 +606,7 @@ export default function StudyMaterials() {
             </div>
 
             {showPDFUpload && pdfCategory === 'exercise' && renderPdfForm()}
+            {showExerciseScan && renderScanForm('exercise')}
 
             {showExerciseForm && (
               <form onSubmit={handleAddExercise} className="bg-page-cream p-4 rounded-sm border border-coffee-cream/20 space-y-3 animate-fade-in-up">
@@ -479,7 +633,7 @@ export default function StudyMaterials() {
               {exercisesList.length === 0 ? (
                 <div className="border border-dashed border-coffee-cream/30 rounded-sm p-8 text-center">
                   <PenTool size={28} className="mx-auto mb-3 text-coffee-cream/40" />
-                  <p className="text-coffee-cream italic text-sm">No exercises yet — import a TD/exam PDF or scan your paper sheets inside.</p>
+                  <p className="text-coffee-cream italic text-sm">No exercises yet — import a TD/exam PDF, scan your paper sheets, or add one by hand.</p>
                 </div>
               ) : (
                 exercisesList.map((exercise) => (
