@@ -132,7 +132,7 @@ function CandleAndCoffee({ phase, coffeeEmpty, progress, isRunning }) {
             <ellipse cx="75" cy="200" rx="32" ry="7" fill="url(#brassGrad)" />
             <rect x="67" y="202" width="16" height="10" rx="3" fill="#7E5D1C" />
             <ellipse cx="75" cy="206" rx="13" ry="3" fill="#E0B45C" opacity=".8" />
-            <ellipse cx="75" cy="214" rx="38" ry="6" fill="url(#brassGrad)" />
+            <ellipse cx="75" cy="214" rx="48" ry="6" fill="url(#brassGrad)" />
             <ellipse cx="75" cy="213" rx="30" ry="5" fill="none" stroke="#5E4515" strokeWidth="1" opacity=".45" />
             <ellipse cx="75" cy="226" rx="48" ry="6" fill="#3B2314" opacity=".08" />
           </svg>
@@ -223,7 +223,6 @@ export default function Focus() {
     selectedTaskId, setSelectedTaskId,
     selectedGoalId, setSelectedGoalId,
     selectedGoalTaskId, setSelectedGoalTaskId,
-    // ✅ MATCHES FocusTimerContext.jsx exactly
     selectedMaterialId, setSelectedMaterialId,
     selectedBookId, setSelectedBookId,
     completedAt, done,
@@ -241,11 +240,19 @@ export default function Focus() {
   const [weekDays, setWeekDays] = useState([]);
   const [dailyGoal, setDailyGoal] = useState(6);
 
-    const tasksOfSelectedGoal = useMemo(
-    // ✅ CHANGED: check !t.completed instead of t.status !== 'done'
+  const tasksOfSelectedGoal = useMemo(
     () => goalTasks.filter(t => t.goal_id === selectedGoalId && !t.completed),
     [goalTasks, selectedGoalId]
   );
+
+  // ✅ Prevent starting focus unless a valid target is selected for the current mode
+  const isTargetSelected = useMemo(() => {
+    if (focusMode === 'task') return !!selectedTaskId;
+    if (focusMode === 'goal') return !!selectedGoalId;
+    if (focusMode === 'study-material') return !!selectedMaterialId;
+    if (focusMode === 'book') return !!selectedBookId;
+    return false;
+  }, [focusMode, selectedTaskId, selectedGoalId, selectedMaterialId, selectedBookId]);
 
   useEffect(() => {
     if (user) fetchStats();
@@ -257,14 +264,13 @@ export default function Focus() {
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
     const mondayISO = monday.toISOString().split('T')[0];
 
-        const [tasksRes, goalsRes, goalTasksRes, materialsRes, booksRes, todayRes, weekRes, profileRes] = await Promise.all([
+    const [tasksRes, goalsRes, goalTasksRes, materialsRes, booksRes, todayRes, weekRes, profileRes] = await Promise.all([
       supabase.from('tasks').select('id, title').eq('user_id', user.id).eq('status', 'todo'),
       supabase.from('goals').select('id, title').eq('user_id', user.id).eq('status', 'active'),
-      // ✅ CHANGED: 'status' to 'completed'
       supabase.from('goal_tasks').select('id, title, goal_id, completed').eq('user_id', user.id).order('created_at', { ascending: true }),
       supabase.from('materials').select('id, title').eq('user_id', user.id),
-// ✅ Removed .eq('status', 'reading') so it shows ALL books
-      supabase.from('books').select('id, title').eq('user_id', user.id),
+      // ✅ FIX: Only show books that are currently being read
+      supabase.from('books').select('id, title').eq('user_id', user.id).in('status', ['reading', 'currently_reading']),
       supabase.from('pomodoro_sessions').select('duration').eq('user_id', user.id).eq('completed', true).gte('created_at', `${today}T00:00:00`),
       supabase.from('pomodoro_sessions').select('duration, created_at').eq('user_id', user.id).eq('completed', true).gte('created_at', `${mondayISO}T00:00:00`),
       supabase.from('profiles').select('daily_goal_hours').eq('id', user.id).maybeSingle(),
@@ -307,7 +313,7 @@ export default function Focus() {
     setFocusMode('task');
     setSelectedGoalId(null);
     setSelectedGoalTaskId(null);
-    setSelectedMaterialId(null); // ✅
+    setSelectedMaterialId(null);
     setSelectedBookId(null);
   };
   
@@ -315,7 +321,7 @@ export default function Focus() {
     setFocusMode('goal');
     setSelectedTaskId(null);
     setSelectedGoalTaskId(null);
-    setSelectedMaterialId(null); // ✅
+    setSelectedMaterialId(null);
     setSelectedBookId(null);
   };
 
@@ -332,7 +338,7 @@ export default function Focus() {
     setSelectedTaskId(null);
     setSelectedGoalId(null);
     setSelectedGoalTaskId(null);
-    setSelectedMaterialId(null); // ✅
+    setSelectedMaterialId(null);
   };
 
   const handleGoalSelect = (goalId) => {
@@ -433,7 +439,7 @@ export default function Focus() {
                 onChange={(e) => setSelectedTaskId(e.target.value || null)}
                 className="flex-1 bg-transparent focus:outline-none font-body text-sm text-library-ink"
               >
-                <option value="">Select a task (optional)...</option>
+                <option value="">Select a task...</option>
                 {tasks.map((t) => (
                   <option key={t.id} value={t.id}>{t.title}</option>
                 ))}
@@ -511,11 +517,11 @@ export default function Focus() {
             <div className="flex items-center gap-2 bg-page-cream border border-coffee-cream/20 rounded-sm px-4 py-3">
               <FileText size={18} className="text-coffee-cream shrink-0" />
               <select
-                value={selectedMaterialId || ''} // ✅ MATCHES Context
-                onChange={(e) => setSelectedMaterialId(e.target.value || null)} // ✅ MATCHES Context
+                value={selectedMaterialId || ''}
+                onChange={(e) => setSelectedMaterialId(e.target.value || null)}
                 className="flex-1 bg-transparent focus:outline-none font-body text-sm text-library-ink"
               >
-                <option value="">Select a material (optional)...</option>
+                <option value="">Select a material...</option>
                 {studyMaterials.map((sm) => (
                   <option key={sm.id} value={sm.id}>{sm.title}</option>
                 ))}
@@ -532,12 +538,19 @@ export default function Focus() {
                 onChange={(e) => setSelectedBookId(e.target.value || null)}
                 className="flex-1 bg-transparent focus:outline-none font-body text-sm text-library-ink"
               >
-                <option value="">Select a book (optional)...</option>
+                <option value="">Select a book...</option>
                 {books.map((b) => (
                   <option key={b.id} value={b.id}>{b.title}</option>
                 ))}
               </select>
             </div>
+          )}
+
+          {/* ✅ Helper text if no target is selected */}
+          {!isTargetSelected && (
+            <p className="text-center font-body text-xs text-maple-rust italic mt-3 animate-fade-in-up">
+              Please select a {focusMode === 'task' ? 'task' : focusMode === 'goal' ? 'goal' : focusMode === 'study-material' ? 'study material' : 'book'} to begin your focus session.
+            </p>
           )}
         </div>
       )}
@@ -589,8 +602,13 @@ export default function Focus() {
         ) : (
           <button
             onClick={start}
+            disabled={phase === 'focus' && !isTargetSelected}
             className={`flex items-center gap-2 text-page-cream px-8 py-3.5 rounded-sm font-label text-sm uppercase tracking-wider transition-all ${
-              phase === 'focus' ? 'bg-maple-rust hover:bg-yale-blue' : 'bg-porch-sage hover:bg-maple-rust'
+              phase === 'focus' && !isTargetSelected
+                ? 'bg-coffee-cream/30 cursor-not-allowed'
+                : phase === 'focus' 
+                  ? 'bg-maple-rust hover:bg-yale-blue' 
+                  : 'bg-porch-sage hover:bg-maple-rust'
             }`}
           >
             <Play size={18} /> {timeLeft !== durationMin * 60 ? 'Resume' : phase === 'focus' ? 'Start Focus' : 'Start Break'}
@@ -665,7 +683,7 @@ export default function Focus() {
           {weekDays.map((d) => (
             <span
               key={d.date}
-              className={`flex-1 text-center font-label text-[0.6rem] uppercase tracking-wider-label ${
+              className={`flex-1 text-center font-label text-[0.6rem] uppercase tracking-wider ${
                 d.date === todayStr ? 'text-maple-rust font-semibold' : 'text-coffee-cream'
               }`}
             >
