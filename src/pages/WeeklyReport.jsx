@@ -1,10 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { 
   TrendingUp, BookOpen, FileText, Target, CheckCircle, 
   XCircle, Clock, Award, AlertCircle, ArrowUp, ArrowDown,
-  Calendar, BarChart3, Lightbulb, ChevronLeft, ChevronRight
+  Calendar, BarChart3, Lightbulb, ChevronLeft, ChevronRight, Sparkles
 } from 'lucide-react';
 
 export default function WeeklyReport() {
@@ -12,6 +12,10 @@ export default function WeeklyReport() {
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [currentWeekOffset, setCurrentWeekOffset] = useState(0);
+  
+  // ✅ AI Advice State
+  const [aiAdvice, setAiAdvice] = useState(null);
+  const [loadingAdvice, setLoadingAdvice] = useState(false);
 
   useEffect(() => {
     if (user) fetchWeeklyReport();
@@ -19,6 +23,7 @@ export default function WeeklyReport() {
 
   const fetchWeeklyReport = async () => {
     setLoading(true);
+    setAiAdvice(null); // Reset AI advice on week change
     
     const today = new Date();
     const weekStart = new Date(today);
@@ -39,7 +44,8 @@ export default function WeeklyReport() {
       goalTasksRes,
       goalsRes,
       booksRes,
-      materialsRes
+      materialsRes,
+      profileRes
     ] = await Promise.all([
       supabase.from('pomodoro_sessions')
         .select('duration, task_id, goal_id, goal_task_id, book_id, material_id, created_at')
@@ -61,12 +67,17 @@ export default function WeeklyReport() {
         .eq('user_id', user.id),
       
       supabase.from('books')
-        .select('id, title, status')
+        .select('id, title, status, current_page, total_pages, progress_percent, days_since_update')
         .eq('user_id', user.id),
       
       supabase.from('materials')
         .select('id, title')
         .eq('user_id', user.id),
+        
+      supabase.from('profiles')
+        .select('daily_goal_hours')
+        .eq('id', user.id)
+        .maybeSingle()
     ]);
 
     const sessions = sessionsRes.data || [];
@@ -75,6 +86,7 @@ export default function WeeklyReport() {
     const goals = goalsRes.data || [];
     const books = booksRes.data || [];
     const materials = materialsRes.data || [];
+    const profile = profileRes.data || {};
 
     // Calculate total time
     const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration || 0), 0);
@@ -119,7 +131,7 @@ export default function WeeklyReport() {
       : 0;
 
     // Book stats
-    const readingBooks = books.filter(b => b.status === 'reading');
+    const readingBooks = books.filter(b => b.status === 'reading' || b.status === 'currently_reading');
 
     // Calculate grade
     const grade = calculateGrade({
@@ -128,19 +140,9 @@ export default function WeeklyReport() {
       totalHours: parseFloat(totalHours),
     });
 
-    // Generate advice
-    const advice = generateAdvice({
-      taskCompletionRate,
-      avgGoalProgress,
-      totalHours: parseFloat(totalHours),
-      pendingTasks,
-      completedTasks,
-      activeGoals,
-      readingBooks,
-    });
-
     // Daily breakdown for chart
     const dailyData = generateDailyData(sessions, weekStart, weekEnd);
+    const mostProductiveDay = dailyData.reduce((max, d) => d.minutes > max.minutes ? d : max, dailyData[0])?.label || 'N/A';
 
     setReportData({
       weekStart,
@@ -154,7 +156,7 @@ export default function WeeklyReport() {
         completionRate: taskCompletionRate,
         byTask: timeByTask,
         pendingList: pendingTasks,
-        allTasks: tasks, // Add this to look up task titles
+        allTasks: tasks,
       },
       goals: {
         total: goals.length,
@@ -174,11 +176,58 @@ export default function WeeklyReport() {
         total: materials.length,
       },
       grade,
-      advice,
       dailyData,
+      profile
     });
 
     setLoading(false);
+
+    // ✅ Trigger AI Advice Generation
+    fetchAiAdvice({
+      tasksCompleted: completedTasks.length,
+      tasksTotal: tasks.length,
+      taskCompletionRate,
+      totalFocusMinutes: totalMinutes,
+      goalAchievementPercent: avgGoalProgress,
+      mostProductiveDay,
+      avgSessionLength: sessions.length > 0 ? totalMinutes / sessions.length : 0,
+      totalSessions: sessions.length,
+      observations: `You spent ${(totalMinutes/60).toFixed(1)} hours focusing this week across ${sessions.length} sessions.`
+    });
+  };
+
+  const fetchAiAdvice = async (weekData) => {
+    setLoadingAdvice(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-weekly-advice', {
+        body: { 
+          userId: user.id,
+          weekData
+        }
+      });
+
+      if (data?.advice && !error) {
+        setAiAdvice(data.advice);
+      } else {
+        // Fallback to static advice if AI fails
+        setAiAdvice(generateStaticAdvice({
+          taskCompletionRate: weekData.taskCompletionRate,
+          avgGoalProgress: weekData.goalAchievementPercent,
+          totalHours: weekData.totalFocusMinutes / 60,
+          readingBooksCount: reportData?.books?.reading || 0
+        }));
+      }
+    } catch (err) {
+      console.error('Error fetching AI advice:', err);
+      setAiAdvice(generateStaticAdvice({
+        taskCompletionRate: weekData.taskCompletionRate,
+        avgGoalProgress: weekData.goalAchievementPercent,
+        totalHours: weekData.totalFocusMinutes / 60,
+        readingBooksCount: reportData?.books?.reading || 0
+      }));
+    } finally {
+      setLoadingAdvice(false);
+    }
   };
 
   if (loading) {
@@ -308,7 +357,7 @@ export default function WeeklyReport() {
 
       {/* Time Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ✅ Tasks Time */}
+        {/* Tasks Time */}
         <div className="cozy-card p-6">
           <h3 className="font-display text-lg text-yale-blue mb-4 flex items-center gap-2">
             <FileText size={18} /> Time by Task
@@ -366,7 +415,7 @@ export default function WeeklyReport() {
           )}
         </div>
 
-        {/* ✅ Books Time - NEW */}
+        {/* Books Time */}
         <div className="cozy-card p-6">
           <h3 className="font-display text-lg text-yale-blue mb-4 flex items-center gap-2">
             <BookOpen size={18} /> Time by Book
@@ -426,31 +475,47 @@ export default function WeeklyReport() {
         </div>
       )}
 
-      {/* Advice Section */}
+      {/* ✅ AI Advice Section */}
       <div className="cozy-card p-6">
         <h3 className="font-display text-lg text-yale-blue mb-4 flex items-center gap-2">
-          <Lightbulb size={18} className="text-gilmore-gold" /> Personalized Advice
+          {loadingAdvice ? (
+            <Sparkles size={18} className="text-gilmore-gold animate-pulse" />
+          ) : (
+            <Lightbulb size={18} className="text-gilmore-gold" />
+          )}
+          Personalized Advice
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {reportData.advice.tasks && (
-            <AdviceCard icon={FileText} category="Tasks" advice={reportData.advice.tasks} />
-          )}
-          {reportData.advice.goals && (
-            <AdviceCard icon={Target} category="Goals" advice={reportData.advice.goals} />
-          )}
-          {reportData.advice.books && (
-            <AdviceCard icon={BookOpen} category="Reading" advice={reportData.advice.books} />
-          )}
-          {reportData.advice.time && (
-            <AdviceCard icon={Clock} category="Time Management" advice={reportData.advice.time} />
-          )}
-        </div>
+        
+        {loadingAdvice ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[1, 2, 3, 4].map(i => (
+              <div key={i} className="p-4 border border-coffee-cream/20 rounded-sm bg-page-cream/50 animate-pulse">
+                <div className="h-4 bg-coffee-cream/20 rounded w-1/3 mb-3"></div>
+                <div className="h-3 bg-coffee-cream/10 rounded w-full mb-2"></div>
+                <div className="h-3 bg-coffee-cream/10 rounded w-3/4"></div>
+              </div>
+            ))}
+          </div>
+        ) : aiAdvice ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {aiAdvice.tasks && <AdviceCard icon={FileText} category="Tasks" advice={aiAdvice.tasks} />}
+            {aiAdvice.goals && <AdviceCard icon={Target} category="Goals" advice={aiAdvice.goals} />}
+            {aiAdvice.reading && <AdviceCard icon={BookOpen} category="Reading" advice={aiAdvice.reading} />}
+            {aiAdvice.time_management && <AdviceCard icon={Clock} category="Time Management" advice={aiAdvice.time_management} />}
+          </div>
+        ) : (
+          <p className="text-sm text-coffee-cream italic text-center py-8">
+            Unable to generate personalized advice. Check your connection and try again.
+          </p>
+        )}
       </div>
     </div>
   );
 }
 
-// Helper Functions
+// ============================================
+// 🧠 HELPER FUNCTIONS
+// ============================================
 
 function calculateGrade(metrics) {
   const { taskCompletionRate, avgGoalProgress, totalHours } = metrics;
@@ -490,7 +555,8 @@ function getGradeMessage(grade) {
   return messages[grade] || messages['C'];
 }
 
-function generateAdvice(metrics) {
+// ✅ Fallback advice if AI Edge Function fails
+function generateStaticAdvice(metrics) {
   const advice = {};
 
   if (metrics.taskCompletionRate < 50) {
@@ -509,22 +575,22 @@ function generateAdvice(metrics) {
     advice.goals = "Fantastic goal progress! You're on track to achieve your objectives. Keep up the consistency!";
   }
 
-  if (metrics.readingBooks.length === 0) {
-    advice.books = "Consider adding a book to your reading list. Even 10 pages a day can make a significant difference over time.";
-  } else if (metrics.readingBooks.length < 3) {
-    advice.books = "Good reading habit! Try to maintain consistency by setting aside specific reading time each evening.";
+  if (metrics.readingBooksCount === 0) {
+    advice.reading = "Consider adding a book to your reading list. Even 10 pages a day can make a significant difference over time.";
+  } else if (metrics.readingBooksCount < 3) {
+    advice.reading = "Good reading habit! Try to maintain consistency by setting aside specific reading time each evening.";
   } else {
-    advice.books = "Impressive reading list! You're absorbing knowledge consistently. Consider taking notes to retain more.";
+    advice.reading = "Impressive reading list! You're absorbing knowledge consistently. Consider taking notes to retain more.";
   }
 
   if (metrics.totalHours < 10) {
-    advice.time = "Try to increase your focus time gradually. Start with one additional 25-minute session per day.";
+    advice.time_management = "Try to increase your focus time gradually. Start with one additional 25-minute session per day.";
   } else if (metrics.totalHours < 25) {
-    advice.time = "Solid focus time! Try batching similar tasks together to maximize deep work sessions.";
+    advice.time_management = "Solid focus time! Try batching similar tasks together to maximize deep work sessions.";
   } else if (metrics.totalHours > 50) {
-    advice.time = "Excellent dedication! Remember to balance intense focus with adequate rest to avoid burnout.";
+    advice.time_management = "Excellent dedication! Remember to balance intense focus with adequate rest to avoid burnout.";
   } else {
-    advice.time = "Great time management! You're maintaining a healthy and productive balance.";
+    advice.time_management = "Great time management! You're maintaining a healthy and productive balance.";
   }
 
   return advice;
