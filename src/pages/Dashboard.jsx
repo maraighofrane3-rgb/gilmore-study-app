@@ -3,12 +3,13 @@ import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useFocusTimer } from '../context/FocusTimerContext';
+import { useScholarStats } from '../hooks/useScholarStats'; // ✅ Added: Single source of truth for stats
 import { lazy, Suspense } from 'react';
 const DailyCoach = lazy(() => import('../components/DailyCoach'));
 import { ensureReminderRow, syncReminderSnapshot, maybeShowLocalReminder } from '../utils/reminders';
 import {
   Play, Plus, PenLine, Upload, CheckCircle, Circle,
-  CalendarDays, ChevronRight,
+  CalendarDays, ChevronRight, Flame, Award,
 } from 'lucide-react';
 
 function getGreeting() {
@@ -50,6 +51,10 @@ function MiniCoffee() {
 export default function Dashboard() {
   const { user, signOut } = useAuth();
   const { isRunning, timeLeft, durationMin, completedAt } = useFocusTimer();
+  
+  // ✅ Use the exact same hook as History.jsx for guaranteed consistency
+  const { level, currentStreak } = useScholarStats();
+
   const [tasks, setTasks] = useState([]);
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [goalHours, setGoalHours] = useState(6);
@@ -59,63 +64,45 @@ export default function Dashboard() {
   const today = new Date();
   const todayKey = keyOf(today);
 
-    useEffect(() => {
+  useEffect(() => {
     if (!user) return;
     let mounted = true;
     const loadData = async () => {
-      const sixtyDaysAgo = new Date(Date.now() - 60 * 86400e3).toISOString().slice(0, 10);
-      
-      const [tasksRes, sessionsRes, profileRes, streakRes] = await Promise.all([
+      // ✅ Removed manual streak/level queries since useScholarStats handles it
+      const [tasksRes, sessionsRes, profileRes] = await Promise.all([
         supabase.from('tasks').select('id, title, status, due_date').eq('user_id', user.id),
         supabase.from('pomodoro_sessions').select('duration').eq('user_id', user.id).eq('completed', true).gte('created_at', `${todayKey}T00:00:00`),
         supabase.from('profiles').select('daily_goal_hours').eq('id', user.id).maybeSingle(),
-        // 🔥 Streak: completed sessions over the last 60 days
-        supabase.from('pomodoro_sessions')
-          .select('created_at')
-          .eq('user_id', user.id)
-          .eq('completed', true)
-          .gte('created_at', `${sixtyDaysAgo}T00:00:00`)
-          .order('created_at', { ascending: false })
-          .limit(2000),
       ]);
+      
       if (!mounted) return;
       
-      const tasks = tasksRes.data || [];
-      const todayMinutes = (sessionsRes.data || []).reduce((s, r) => s + (r.duration || 0), 0);
-      const goalHours = profileRes.data?.daily_goal_hours || 6;
+      const fetchedTasks = tasksRes.data || [];
+      const todayMins = (sessionsRes.data || []).reduce((s, r) => s + (r.duration || 0), 0);
+      const goal = profileRes.data?.daily_goal_hours || 6;
       
-      // Compute streak from session days
-      const activeDays = new Set((streakRes.data || []).map(s => s.created_at.slice(0, 10)));
-      let streak = 0;
-      for (let i = 0; i <= 60; i++) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        if (activeDays.has(d.toISOString().slice(0, 10))) streak++;
-        else if (i > 0) break;
-      }
-      
-      setTasks(tasks);
-      setTodayMinutes(todayMinutes);
-      setGoalHours(goalHours);
+      setTasks(fetchedTasks);
+      setTodayMinutes(todayMins);
+      setGoalHours(goal);
       setLoading(false);
 
       // 🔔 Sync reminder system
       await ensureReminderRow();
       
-      const todayTasks = tasks.filter(t => {
+      const todayTasks = fetchedTasks.filter(t => {
         if (!t.due_date) return true;
         const dueDate = new Date(t.due_date).toISOString().slice(0, 10);
         return dueDate === todayKey;
       });
       
       const snapshot = {
-        goalHours,
-        focusedMinutes: todayMinutes,
-        streak,
-        tasksDue: todayTasks.filter(t => t.status !== 'completed').length,
-        tasksDone: todayTasks.filter(t => t.status === 'completed').length,
+        goalHours: goal,
+        focusedMinutes: todayMins,
+        streak: currentStreak, // ✅ Pass the live streak to the reminder snapshot
+        tasksDue: todayTasks.filter(t => t.status !== 'completed' && t.status !== 'done').length,
+        tasksDone: todayTasks.filter(t => t.status === 'completed' || t.status === 'done').length,
         taskList: todayTasks
-          .filter(t => t.status !== 'completed')
+          .filter(t => t.status !== 'completed' && t.status !== 'done')
           .map(t => t.title)
           .join('\n'),
       };
@@ -125,10 +112,10 @@ export default function Dashboard() {
     };
     loadData();
     return () => { mounted = false; };
-  }, [user, todayKey, completedAt]);
+  }, [user, todayKey, completedAt, currentStreak]);
 
   const toggleTask = async (task) => {
-    const newStatus = task.status === 'done' ? 'todo' : 'done';
+    const newStatus = task.status === 'done' || task.status === 'completed' ? 'todo' : 'done';
     setTasks(tasks.map((t) => (t.id === task.id ? { ...t, status: newStatus } : t)));
     await supabase.from('tasks').update({ status: newStatus }).eq('id', task.id);
   };
@@ -138,7 +125,7 @@ export default function Dashboard() {
   const plus7 = new Date(today);
   plus7.setDate(today.getDate() + 7);
   const upcoming = tasks
-    .filter((t) => t.status !== 'done' && t.due_date && t.due_date > todayKey && t.due_date <= keyOf(plus7))
+    .filter((t) => t.status !== 'done' && t.status !== 'completed' && t.due_date && t.due_date > todayKey && t.due_date <= keyOf(plus7))
     .sort((a, b) => a.due_date.localeCompare(b.due_date))
     .slice(0, 5);
 
@@ -159,19 +146,40 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between animate-fade-in-up">
-        <div>
-          <p className="eyebrow mb-1">
-            {today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-          </p>
-          <h1 className="font-display text-3xl text-yale-blue">
-            {greeting}, <span className="italic text-maple-rust">{firstName}</span>.
-            <MiniCoffee />
-          </h1>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 animate-fade-in-up">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div>
+            <p className="eyebrow mb-1">
+              {today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+            </p>
+            <h1 className="font-display text-3xl text-yale-blue flex items-center gap-2 flex-wrap">
+              {greeting}, <span className="italic text-maple-rust">{firstName}</span>.
+              <MiniCoffee />
+            </h1>
+          </div>
+          
+          {/* ✅ Streak & Level Badges (using live data from useScholarStats) */}
+          <div className="flex items-center gap-3 pl-0 sm:pl-4 border-t sm:border-t-0 sm:border-l border-coffee-cream/30 pt-3 sm:pt-0">
+            <div className="flex items-center gap-2 bg-parchment/50 px-3 py-1.5 rounded-sm border border-coffee-cream/20" title="Current streak of focused days">
+              <Flame size={16} className="text-maple-rust" />
+              <div className="flex flex-col leading-none">
+                <span className="font-display text-sm text-yale-blue">{currentStreak}</span>
+                <span className="font-label text-[0.55rem] uppercase tracking-wider text-coffee-cream">Day Streak</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 bg-parchment/50 px-3 py-1.5 rounded-sm border border-coffee-cream/20" title="Scholar level based on total focus time">
+              <Award size={16} className="text-gilmore-gold" />
+              <div className="flex flex-col leading-none">
+                <span className="font-display text-sm text-yale-blue">Lvl {level}</span>
+                <span className="font-label text-[0.55rem] uppercase tracking-wider text-coffee-cream">Scholar</span>
+              </div>
+            </div>
+          </div>
         </div>
+        
         <button
           onClick={signOut}
-          className="border border-maple-rust text-maple-rust px-4 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust hover:text-page-cream transition-colors"
+          className="border border-maple-rust text-maple-rust px-4 py-2 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust hover:text-page-cream transition-colors shrink-0 self-start sm:self-auto"
         >
           Log Out
         </button>
@@ -179,10 +187,10 @@ export default function Dashboard() {
 
       {/* Daily Coach */}
       <div className="animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
-  <Suspense fallback={<div className="text-coffee-cream italic text-sm">Consulting the daily scrolls...</div>}>
-    <DailyCoach />
-  </Suspense>
-</div>
+        <Suspense fallback={<div className="text-coffee-cream italic text-sm">Consulting the daily scrolls...</div>}>
+          <DailyCoach />
+        </Suspense>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
         {/* ── Left: today's engine ── */}
@@ -264,10 +272,10 @@ export default function Dashboard() {
             ) : (
               todayTasks.map((t) => (
                 <div key={t.id} className="flex items-center gap-3 bg-page-cream border border-coffee-cream/20 rounded-sm p-3">
-                  <button onClick={() => toggleTask(t)} className={t.status === 'done' ? 'text-porch-sage' : 'text-coffee-cream hover:text-porch-sage transition-colors'}>
-                    {t.status === 'done' ? <CheckCircle size={18} /> : <Circle size={18} />}
+                  <button onClick={() => toggleTask(t)} className={t.status === 'done' || t.status === 'completed' ? 'text-porch-sage' : 'text-coffee-cream hover:text-porch-sage transition-colors'}>
+                    {t.status === 'done' || t.status === 'completed' ? <CheckCircle size={18} /> : <Circle size={18} />}
                   </button>
-                  <span className={`font-body text-sm ${t.status === 'done' ? 'line-through text-coffee-cream' : 'text-library-ink'}`}>
+                  <span className={`font-body text-sm ${t.status === 'done' || t.status === 'completed' ? 'line-through text-coffee-cream' : 'text-library-ink'}`}>
                     {t.title}
                   </span>
                 </div>
