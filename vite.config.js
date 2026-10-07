@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'favicon3.png', 'masked-icon.svg'], // Updated here
+      includeAssets: ['favicon.svg', 'favicon1.png', 'favicon2.png', 'favicon3.png'],
       manifest: {
         name: "Rory's World",
         short_name: 'RorysWorld',
@@ -19,17 +19,17 @@ export default defineConfig({
         start_url: '/',
         icons: [
           {
-            src: '/favicon1.png', // Updated to your name
+            src: '/favicon1.png',
             sizes: '192x192',
             type: 'image/png'
           },
           {
-            src: '/favicon2.png', // Updated to your name
+            src: '/favicon2.png',
             sizes: '512x512',
             type: 'image/png'
           },
           {
-            src: '/favicon2.png', // Updated to your name (used for maskable)
+            src: '/favicon2.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any maskable'
