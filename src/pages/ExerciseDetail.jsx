@@ -23,7 +23,7 @@ export default function ExerciseDetail() {
   const [uploadingPDF, setUploadingPDF] = useState(false);
   const fileInputRef = useRef(null);
 
-  //  Scanned paper notes state
+  // 📷 Scanned paper notes state
   const [scans, setScans] = useState([]);
   const [uploadingScans, setUploadingScans] = useState(false);
   const scanInputRef = useRef(null);
@@ -213,7 +213,7 @@ export default function ExerciseDetail() {
       try {
         extractedText = await extractTextFromPDF(file);
       } catch (textErr) {
-        console.warn('️ Standard extraction failed (scanned PDF?):', textErr.message);
+        console.warn('⚠️ Standard extraction failed (scanned PDF?):', textErr.message);
         extractedText = '';
       }
 
@@ -279,20 +279,70 @@ export default function ExerciseDetail() {
     e.target.value = '';
   };
 
+  // ✅ MOBILE-FRIENDLY: Convert any image to JPEG (fixes mobile HEIC/memory issues)
+  const convertToJpeg = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxSize = 1024; // Strictly limit dimensions to prevent mobile canvas crashes
+          const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+          
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#FFFFFF'; // White background for transparency
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          
+          canvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Failed to convert to JPEG'));
+          }, 'image/jpeg', 0.7); // Lower quality to keep payload small
+        };
+        img.onerror = reject;
+        img.src = e.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
   const scanToJpegBase64 = (url) => new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const max = 1600;
-      const scale = Math.min(1, max / Math.max(img.width, img.height));
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
+    
+    img.onerror = () => {
+      console.error('Failed to load image from URL:', url);
+      reject(new Error('Failed to load image. It might be corrupted or blocked by CORS.'));
     };
-    img.onerror = reject;
-    img.src = url;
+    
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const max = 1024; // Match mobile compression limits
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        resolve(dataUrl.split(',')[1]);
+      } catch (err) {
+        console.error('Canvas conversion error:', err);
+        reject(new Error('Failed to process image on device.'));
+      }
+    };
+    
+    setTimeout(() => reject(new Error('Image loading timed out on mobile network')), 15000);
+    img.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
   });
 
   const loadScanImages = async (list) => {
@@ -305,6 +355,7 @@ export default function ExerciseDetail() {
     } catch (e) { console.warn('Scan load failed:', e); return null; }
   };
 
+  // ✅ UPDATED: Uses convertToJpeg to fix mobile uploads
   const handleScanUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -312,14 +363,31 @@ export default function ExerciseDetail() {
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const ext = file.name.split('.').pop().toLowerCase();
+        
+        // Convert to JPEG using canvas to fix mobile HEIC/large file issues
+        const jpegBlob = await convertToJpeg(file);
+        const ext = 'jpg'; 
         const path = `${user.id}/scans/${Date.now()}-${i}.${ext}`;
-        const { error: upErr } = await supabase.storage.from('scan-notes').upload(path, file);
+        
+        const { error: upErr } = await supabase.storage
+          .from('scan-notes')
+          .upload(path, jpegBlob, {
+            cacheControl: '3600',
+            contentType: 'image/jpeg'
+          });
+        
         if (upErr) throw upErr;
-        const { data: { publicUrl } } = supabase.storage.from('scan-notes').getPublicUrl(path);
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from('scan-notes')
+          .getPublicUrl(path);
+        
         await supabase.from('doc_scans').insert([{
-          user_id: user.id, doc_id: chapterId, file_path: path,
-          public_url: publicUrl, position: scans.length + i,
+          user_id: user.id,
+          doc_id: chapterId,
+          file_path: path,
+          public_url: publicUrl,
+          position: scans.length + i,
         }]);
       }
       const { data } = await supabase.from('doc_scans').select('*').eq('doc_id', chapterId).order('position');
@@ -444,7 +512,6 @@ export default function ExerciseDetail() {
     const t = Math.max(f, parseInt(toPage, 10) || f);
     const hasRangeLocal = fromPage !== '' || toPage !== '';
 
-    //  EXPLICIT SOURCE SELECTION
     if (analysisSource === 'scans') {
       if (scans.length === 0) {
         showNotification('No scanned notes available. Please upload scans first.', 'error');
@@ -454,7 +521,6 @@ export default function ExerciseDetail() {
       pageImages = await loadScanImages(scans.slice(0, 6));
       scope = 'your scanned notes';
     } else {
-      // Default to PDF logic
       const rawText = getReadableText();
       if (!rawText && !chapter?.pdf_url) {
         showNotification('This exercise has no readable text or PDF yet. Click "Add PDF" or upload scanned notes.', 'error');
@@ -483,7 +549,6 @@ export default function ExerciseDetail() {
 
       sourceText = (sourceText || '').replace(/\s+/g, ' ').trim();
 
-      // Fallback: if PDF text is garbage, render pages as images
       if (isGarbageText(sourceText) && !pageImages && chapter?.pdf_url) {
         pageImages = await safeRenderPages(chapter.pdf_url, hasRangeLocal ? f : 1, hasRangeLocal ? t : 4);
         if (hasRangeLocal) scope = `pages ${f} to ${t}`;
@@ -509,7 +574,7 @@ export default function ExerciseDetail() {
         setChapterResult(Array.isArray(cachedResult) ? cachedResult.join('\n') : cachedResult);
         setCacheHit(true);
         setAnalyzing(false);
-        showNotification(`Loaded from cache! (Instant )`);
+        showNotification(`Loaded from cache! (Instant ⚡)`);
         return;
       }
 
@@ -910,7 +975,7 @@ export default function ExerciseDetail() {
             <h3 className="font-display text-lg text-yale-blue">Ask questions about this exercise</h3>
           </div>
           <span className="font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream bg-page-cream border border-coffee-cream/20 px-2 py-1 rounded-sm">
-            {analysisSource === 'scans' ? '📷 Scanned Notes' : (chatHasRange ? `📖 Pages ${chatRangeFrom}–${chatRangeTo}` : ' Whole exercise')}
+            {analysisSource === 'scans' ? '📷 Scanned Notes' : (chatHasRange ? `📖 Pages ${chatRangeFrom}–${chatRangeTo}` : '📖 Whole exercise')}
           </span>
         </div>
 

@@ -22,7 +22,7 @@ export default function ChapterDetail() {
   const [uploadingPDF, setUploadingPDF] = useState(false);
   const fileInputRef = useRef(null);
 
-  // 📷 Scanned paper notes state
+  //  Scanned paper notes state
   const [scans, setScans] = useState([]);
   const [uploadingScans, setUploadingScans] = useState(false);
   const scanInputRef = useRef(null);
@@ -225,7 +225,7 @@ export default function ChapterDetail() {
             extractedText = vision.text;
             showNotification('Vision AI read the pages successfully!');
           } else {
-            console.error('❌ Vision function error:', vErr?.message || vErr);
+            console.error(' Vision function error:', vErr?.message || vErr);
             showNotification('Vision AI could not read the pages.', 'error');
           }
         } catch (visionErr) {
@@ -235,7 +235,7 @@ export default function ChapterDetail() {
       }
 
       const htmlContent = await renderPDFAsImages(file);
-      const divider = `\n\n<div class="pdf-divider" style="text-align: center; margin: 2rem 0; color: #8b5e3c; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; border-top: 1px solid #d4c5b5; border-bottom: 1px solid #d4c5b5; padding: 1rem 0;">📄 ${file.name} · added on ${new Date().toLocaleDateString()}</div>\n\n`;
+      const divider = `\n\n<div class="pdf-divider" style="text-align: center; margin: 2rem 0; color: #8b5e3c; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; border-top: 1px solid #d4c5b5; border-bottom: 1px solid #d4c5b5; padding: 1rem 0;"> ${file.name} · added on ${new Date().toLocaleDateString()}</div>\n\n`;
       const isExistingHtml = chapter.content && (chapter.content.includes('<img') || chapter.content.includes('<div class="pdf-pages"'));
       const newContent = isExistingHtml
         ? chapter.content + divider + htmlContent
@@ -273,17 +273,35 @@ export default function ChapterDetail() {
   const scanToJpegBase64 = (url) => new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const max = 1600;
-      const scale = Math.min(1, max / Math.max(img.width, img.height));
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
+    
+    img.onerror = () => {
+      console.error('Failed to load image from URL:', url);
+      reject(new Error('Failed to load image. It might be corrupted or blocked by CORS.'));
     };
-    img.onerror = reject;
-    img.src = url;
+    
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const max = 1024;
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        resolve(dataUrl.split(',')[1]);
+      } catch (err) {
+        console.error('Canvas conversion error:', err);
+        reject(new Error('Failed to process image on device.'));
+      }
+    };
+    
+    setTimeout(() => reject(new Error('Image loading timed out on mobile network')), 15000);
+    img.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
   });
 
   const loadScanImages = async (list) => {
@@ -305,12 +323,26 @@ export default function ChapterDetail() {
         const file = files[i];
         const ext = file.name.split('.').pop().toLowerCase();
         const path = `${user.id}/scans/${Date.now()}-${i}.${ext}`;
-        const { error: upErr } = await supabase.storage.from('scan-notes').upload(path, file);
+        
+        const { error: upErr } = await supabase.storage
+          .from('scan-notes')
+          .upload(path, file, {
+            cacheControl: '3600',
+            contentType: file.type || 'image/jpeg'
+          });
+        
         if (upErr) throw upErr;
-        const { data: { publicUrl } } = supabase.storage.from('scan-notes').getPublicUrl(path);
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from('scan-notes')
+          .getPublicUrl(path);
+        
         await supabase.from('doc_scans').insert([{
-          user_id: user.id, doc_id: chapterId, file_path: path,
-          public_url: publicUrl, position: scans.length + i,
+          user_id: user.id,
+          doc_id: chapterId,
+          file_path: path,
+          public_url: publicUrl,
+          position: scans.length + i,
         }]);
       }
       const { data } = await supabase.from('doc_scans').select('*').eq('doc_id', chapterId).order('position');
@@ -435,7 +467,6 @@ export default function ChapterDetail() {
     const t = Math.max(f, parseInt(toPage, 10) || f);
     const hasRangeLocal = fromPage !== '' || toPage !== '';
 
-    // 🎯 EXPLICIT SOURCE SELECTION
     if (analysisSource === 'scans') {
       if (scans.length === 0) {
         showNotification('No scanned notes available. Please upload scans first.', 'error');
@@ -445,7 +476,6 @@ export default function ChapterDetail() {
       pageImages = await loadScanImages(scans.slice(0, 6));
       scope = 'your scanned notes';
     } else {
-      // Default to PDF logic
       const rawText = getReadableText();
       if (!rawText && !chapter?.pdf_url) {
         showNotification('This chapter has no readable text or PDF yet. Click "Add PDF" or upload scanned notes.', 'error');
@@ -474,7 +504,6 @@ export default function ChapterDetail() {
 
       sourceText = (sourceText || '').replace(/\s+/g, ' ').trim();
 
-      // Fallback: if PDF text is garbage, render pages as images
       if (isGarbageText(sourceText) && !pageImages && chapter?.pdf_url) {
         pageImages = await safeRenderPages(chapter.pdf_url, hasRangeLocal ? f : 1, hasRangeLocal ? t : 4);
         if (hasRangeLocal) scope = `pages ${f} to ${t}`;
@@ -709,7 +738,7 @@ export default function ChapterDetail() {
             {chapter.is_from_pdf && <FileIcon size={16} className="text-maple-rust" />}
             <h1 className="font-display text-2xl text-yale-blue">{chapter.title}</h1>
             <span className={`font-label text-[0.6rem] uppercase tracking-wider px-2 py-1 rounded-sm border ${isExercise ? 'border-porch-sage/40 text-porch-sage' : 'border-maple-rust/40 text-maple-rust'}`}>
-              {isExercise ? '✍️ Exercise / Test' : '📖 Chapter / Lecture'}
+              {isExercise ? '✍️ Exercise / Test' : ' Chapter / Lecture'}
             </span>
           </div>
           <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream">
@@ -766,12 +795,12 @@ export default function ChapterDetail() {
         </div>
       )}
 
-      {/* 📷 Scanned Notes (Cleaned up) */}
+      {/* 📷 UPLOADED PHOTOS (Scan button removed) */}
       {scans.length > 0 && (
         <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="font-display text-lg text-yale-blue flex items-center gap-2">
-              <ImageIcon size={18} className="text-maple-rust" /> Scanned Notes ({scans.length})
+              <ImageIcon size={18} className="text-maple-rust" /> Uploaded Photos ({scans.length})
             </h4>
             <button
               onClick={() => setAnalysisSource('scans')}
@@ -783,15 +812,21 @@ export default function ChapterDetail() {
             </button>
           </div>
           <p className="font-body text-xs text-coffee-cream italic">
-            Select "Scanned Notes" in the AI Assistant below to analyze these images.
+            Photos uploaded. Select "Use for AI Analysis" above to let the AI read these images.
           </p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {scans.map((s, idx) => (
-              <div key={s.id} className="relative group rounded-sm overflow-hidden border border-coffee-cream/20 bg-page-cream">
-                <img src={s.public_url} alt={`Scan ${idx + 1}`} className="w-full h-40 object-cover" />
-                <div className="absolute inset-0 bg-yale-blue/70 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                  <span className="font-label text-[0.6rem] uppercase tracking-wider text-page-cream">#{idx + 1}</span>
-                  <button onClick={() => deleteScan(s)} className="text-page-cream hover:text-maple-rust"><Trash2 size={14} /></button>
+              <div key={s.id} className="rounded-sm overflow-hidden border border-coffee-cream/20 bg-page-cream flex flex-col">
+                <img src={s.public_url} alt={`Scan ${idx + 1}`} className="w-full h-40 object-cover bg-coffee-cream/10" />
+                
+                <div className="p-2 flex flex-col gap-2">
+                  <button 
+                    onClick={() => deleteScan(s)} 
+                    className="flex items-center justify-center gap-1.5 text-coffee-cream hover:text-maple-rust text-xs font-label uppercase tracking-wider w-full py-1"
+                  >
+                    <Trash2 size={14} /> Remove
+                  </button>
                 </div>
               </div>
             ))}
@@ -806,7 +841,6 @@ export default function ChapterDetail() {
           <h3 className="font-display text-lg text-yale-blue">AI Study Assistant</h3>
         </div>
 
-        {/* 🎯 EXPLICIT SOURCE SELECTOR */}
         <div className="flex flex-wrap items-center gap-3 mb-2">
           <span className="font-label text-xs uppercase tracking-wider text-coffee-cream">Analyze source:</span>
           <div className="flex bg-parchment border border-coffee-cream/20 rounded-sm p-1">
@@ -903,7 +937,7 @@ export default function ChapterDetail() {
             <h3 className="font-display text-lg text-yale-blue">Ask questions about this chapter</h3>
           </div>
           <span className="font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream bg-page-cream border border-coffee-cream/20 px-2 py-1 rounded-sm">
-            {analysisSource === 'scans' ? '📷 Scanned Notes' : (chatHasRange ? `📖 Pages ${chatRangeFrom}–${chatRangeTo}` : '📖 Whole chapter')}
+            {analysisSource === 'scans' ? '📷 Scanned Notes' : (chatHasRange ? ` Pages ${chatRangeFrom}–${chatRangeTo}` : '📖 Whole chapter')}
           </span>
         </div>
 
