@@ -22,13 +22,11 @@ export default function ChapterDetail() {
   const [uploadingPDF, setUploadingPDF] = useState(false);
   const fileInputRef = useRef(null);
 
-  //  Scanned paper notes state
   const [scans, setScans] = useState([]);
   const [uploadingScans, setUploadingScans] = useState(false);
   const scanInputRef = useRef(null);
 
-  // 🎯 Explicit AI Analysis Source
-  const [analysisSource, setAnalysisSource] = useState('pdf'); // 'pdf' | 'scans'
+  const [analysisSource, setAnalysisSource] = useState('pdf'); 
 
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -225,7 +223,7 @@ export default function ChapterDetail() {
             extractedText = vision.text;
             showNotification('Vision AI read the pages successfully!');
           } else {
-            console.error(' Vision function error:', vErr?.message || vErr);
+            console.error('❌ Vision function error:', vErr?.message || vErr);
             showNotification('Vision AI could not read the pages.', 'error');
           }
         } catch (visionErr) {
@@ -235,7 +233,7 @@ export default function ChapterDetail() {
       }
 
       const htmlContent = await renderPDFAsImages(file);
-      const divider = `\n\n<div class="pdf-divider" style="text-align: center; margin: 2rem 0; color: #8b5e3c; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; border-top: 1px solid #d4c5b5; border-bottom: 1px solid #d4c5b5; padding: 1rem 0;"> ${file.name} · added on ${new Date().toLocaleDateString()}</div>\n\n`;
+      const divider = `\n\n<div class="pdf-divider" style="text-align: center; margin: 2rem 0; color: #8b5e3c; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; border-top: 1px solid #d4c5b5; border-bottom: 1px solid #d4c5b5; padding: 1rem 0;">📄 ${file.name} · added on ${new Date().toLocaleDateString()}</div>\n\n`;
       const isExistingHtml = chapter.content && (chapter.content.includes('<img') || chapter.content.includes('<div class="pdf-pages"'));
       const newContent = isExistingHtml
         ? chapter.content + divider + htmlContent
@@ -268,6 +266,37 @@ export default function ChapterDetail() {
     }
     setUploadingPDF(false);
     e.target.value = '';
+  };
+
+  // ✅ MOBILE-FRIENDLY: Convert any image to JPEG (fixes mobile HEIC/memory issues)
+  const convertToJpeg = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxSize = 1024; // Limit dimensions to prevent mobile crashes
+          const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#FFFFFF'; // White background
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          
+          canvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Failed to convert to JPEG'));
+          }, 'image/jpeg', 0.7); // 70% quality
+        };
+        img.onerror = reject;
+        img.src = e.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
   };
 
   const scanToJpegBase64 = (url) => new Promise((resolve, reject) => {
@@ -314,6 +343,7 @@ export default function ChapterDetail() {
     } catch (e) { console.warn('Scan load failed:', e); return null; }
   };
 
+  // ✅ UPDATED: Uses convertToJpeg to fix mobile uploads
   const handleScanUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -321,14 +351,17 @@ export default function ChapterDetail() {
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const ext = file.name.split('.').pop().toLowerCase();
+        
+        // Convert to JPEG using canvas to fix mobile HEIC/large file issues
+        const jpegBlob = await convertToJpeg(file);
+        const ext = 'jpg';
         const path = `${user.id}/scans/${Date.now()}-${i}.${ext}`;
         
         const { error: upErr } = await supabase.storage
           .from('scan-notes')
-          .upload(path, file, {
+          .upload(path, jpegBlob, {
             cacheControl: '3600',
-            contentType: file.type || 'image/jpeg'
+            contentType: 'image/jpeg'
           });
         
         if (upErr) throw upErr;
@@ -738,7 +771,7 @@ export default function ChapterDetail() {
             {chapter.is_from_pdf && <FileIcon size={16} className="text-maple-rust" />}
             <h1 className="font-display text-2xl text-yale-blue">{chapter.title}</h1>
             <span className={`font-label text-[0.6rem] uppercase tracking-wider px-2 py-1 rounded-sm border ${isExercise ? 'border-porch-sage/40 text-porch-sage' : 'border-maple-rust/40 text-maple-rust'}`}>
-              {isExercise ? '✍️ Exercise / Test' : ' Chapter / Lecture'}
+              {isExercise ? '✍️ Exercise / Test' : '📖 Chapter / Lecture'}
             </span>
           </div>
           <p className="font-label text-[0.6rem] uppercase tracking-wider text-coffee-cream">
@@ -937,7 +970,7 @@ export default function ChapterDetail() {
             <h3 className="font-display text-lg text-yale-blue">Ask questions about this chapter</h3>
           </div>
           <span className="font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream bg-page-cream border border-coffee-cream/20 px-2 py-1 rounded-sm">
-            {analysisSource === 'scans' ? '📷 Scanned Notes' : (chatHasRange ? ` Pages ${chatRangeFrom}–${chatRangeTo}` : '📖 Whole chapter')}
+            {analysisSource === 'scans' ? '📷 Scanned Notes' : (chatHasRange ? `📖 Pages ${chatRangeFrom}–${chatRangeTo}` : '📖 Whole chapter')}
           </span>
         </div>
 

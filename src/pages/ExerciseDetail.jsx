@@ -23,13 +23,11 @@ export default function ExerciseDetail() {
   const [uploadingPDF, setUploadingPDF] = useState(false);
   const fileInputRef = useRef(null);
 
-  // 📷 Scanned paper notes state
   const [scans, setScans] = useState([]);
   const [uploadingScans, setUploadingScans] = useState(false);
   const scanInputRef = useRef(null);
 
-  // 🎯 Explicit AI Analysis Source
-  const [analysisSource, setAnalysisSource] = useState('pdf'); // 'pdf' | 'scans'
+  const [analysisSource, setAnalysisSource] = useState('pdf');
 
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -189,7 +187,6 @@ export default function ExerciseDetail() {
       supabase.from('doc_scans').select('*').eq('doc_id', chapterId).order('position'),
     ]);
 
-    // 🧭 Guard: this page only serves exercise-category docs
     if (chapRes.data && (chapRes.data.category || 'chapter') !== 'exercise') {
       showNotification('This is a chapter — opening the chapter page.');
       navigate(`/study-materials/${materialId}/chapter/${chapterId}`, { replace: true });
@@ -279,71 +276,70 @@ export default function ExerciseDetail() {
     e.target.value = '';
   };
 
-  // ✅ MOBILE-FRIENDLY: Convert any image to JPEG (fixes mobile HEIC/memory issues)
-  const convertToJpeg = (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const maxSize = 1024; // Strictly limit dimensions to prevent mobile canvas crashes
-          const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
-          
-          canvas.width = Math.round(img.width * scale);
-          canvas.height = Math.round(img.height * scale);
-          
-          const ctx = canvas.getContext('2d');
-          ctx.fillStyle = '#FFFFFF'; // White background for transparency
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          
-          canvas.toBlob((blob) => {
-            if (blob) resolve(blob);
-            else reject(new Error('Failed to convert to JPEG'));
-          }, 'image/jpeg', 0.7); // Lower quality to keep payload small
-        };
-        img.onerror = reject;
-        img.src = e.target.result;
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  };
-
-  const scanToJpegBase64 = (url) => new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    
-    img.onerror = () => {
-      console.error('Failed to load image from URL:', url);
-      reject(new Error('Failed to load image. It might be corrupted or blocked by CORS.'));
-    };
-    
-    img.onload = () => {
+  // ✅ MOBILE FIX: Uses createImageBitmap to automatically fix EXIF rotation on mobile!
+  const convertToJpeg = async (file) => {
+    return new Promise(async (resolve, reject) => {
       try {
+        // createImageBitmap natively handles EXIF orientation on mobile!
+        const bitmap = await createImageBitmap(file);
         const canvas = document.createElement('canvas');
-        const max = 1024; // Match mobile compression limits
-        const scale = Math.min(1, max / Math.max(img.width, img.height));
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
+        const maxSize = 1400; // Good balance for AI vision
+        const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
+        
+        canvas.width = Math.round(bitmap.width * scale);
+        canvas.height = Math.round(bitmap.height * scale);
         
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
         
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-        resolve(dataUrl.split(',')[1]);
+        bitmap.close(); // Prevent memory leaks on mobile
+        
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Failed to convert to JPEG'));
+        }, 'image/jpeg', 0.85); // Increased quality for AI OCR readability
       } catch (err) {
-        console.error('Canvas conversion error:', err);
-        reject(new Error('Failed to process image on device.'));
+        console.error('Bitmap conversion error:', err);
+        reject(err);
       }
-    };
-    
-    setTimeout(() => reject(new Error('Image loading timed out on mobile network')), 15000);
-    img.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
-  });
+    });
+  };
+
+  // ✅ MOBILE FIX: Uses fetch + createImageBitmap to avoid CORS tainting and fix rotation
+  const scanToJpegBase64 = async (url) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const bitmap = await createImageBitmap(blob);
+      
+      const canvas = document.createElement('canvas');
+      const max = 1400;
+      const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      
+      bitmap.close();
+      
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((b) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(b);
+        }, 'image/jpeg', 0.85);
+      });
+    } catch (err) {
+      console.error('scanToJpegBase64 error:', err);
+      throw new Error('Failed to process image for AI.');
+    }
+  };
 
   const loadScanImages = async (list) => {
     try {
@@ -355,7 +351,6 @@ export default function ExerciseDetail() {
     } catch (e) { console.warn('Scan load failed:', e); return null; }
   };
 
-  // ✅ UPDATED: Uses convertToJpeg to fix mobile uploads
   const handleScanUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -364,7 +359,6 @@ export default function ExerciseDetail() {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         
-        // Convert to JPEG using canvas to fix mobile HEIC/large file issues
         const jpegBlob = await convertToJpeg(file);
         const ext = 'jpg'; 
         const path = `${user.id}/scans/${Date.now()}-${i}.${ext}`;
@@ -790,7 +784,6 @@ export default function ExerciseDetail() {
           </p>
         </div>
         
-        {/* 🎯 Header Actions: Edit, Add PDF, Scan Notes */}
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={startEdit} className="flex items-center gap-2 border border-yale-blue text-yale-blue px-4 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-yale-blue hover:text-page-cream transition-all">
             <Pencil size={14} /> Edit
@@ -840,7 +833,6 @@ export default function ExerciseDetail() {
         </div>
       )}
 
-      {/* 📷 Scanned Notes (Cleaned up) */}
       {scans.length > 0 && (
         <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -878,7 +870,6 @@ export default function ExerciseDetail() {
           <h3 className="font-display text-lg text-yale-blue">AI Study Assistant</h3>
         </div>
 
-        {/* 🎯 EXPLICIT SOURCE SELECTOR */}
         <div className="flex flex-wrap items-center gap-3 mb-2">
           <span className="font-label text-xs uppercase tracking-wider text-coffee-cream">Analyze source:</span>
           <div className="flex bg-parchment border border-coffee-cream/20 rounded-sm p-1">
