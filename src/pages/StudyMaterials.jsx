@@ -6,7 +6,7 @@ import {
   BookOpen, Plus, Trash2, ArrowLeft, Loader2, 
   Sparkles, FileText, Lightbulb, List, X, ChevronRight,
   Save, CheckCircle, ChevronDown, Upload, FileText as FileIcon,
-  MessageCircle, Send, PenTool, Image as ImageIcon
+  MessageCircle, Send, PenTool, Image as ImageIcon, Search
 } from 'lucide-react';
 
 export default function StudyMaterials() {
@@ -19,6 +19,9 @@ export default function StudyMaterials() {
   const [chapters, setChapters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showMaterialForm, setShowMaterialForm] = useState(false);
+  
+  // 🔍 Search state
+  const [searchQuery, setSearchQuery] = useState('');
   
   // Separate forms for chapters vs exercises
   const [showChapterForm, setShowChapterForm] = useState(false);
@@ -329,6 +332,12 @@ export default function StudyMaterials() {
   // 🆕 Split chapters into two lists
   const chaptersList = chapters.filter(c => (c.category || 'chapter') === 'chapter');
   const exercisesList = chapters.filter(c => c.category === 'exercise');
+
+  // 🔍 Filter materials based on search query
+  const filteredMaterials = materials.filter(material => 
+    material.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (material.description && material.description.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
 
   // 📄 Shared PDF import form
   const renderPdfForm = () => (
@@ -687,14 +696,26 @@ export default function StudyMaterials() {
         </div>
       )}
 
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
         <div>
           <p className="eyebrow mb-2">Academic Resources</p>
           <h1 className="font-display text-4xl text-yale-blue">Study <span className="italic text-maple-rust">Materials</span>.</h1>
         </div>
-        <button onClick={() => setShowMaterialForm(!showMaterialForm)} className="flex items-center gap-2 bg-yale-blue text-page-cream px-5 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all">
+        <button onClick={() => setShowMaterialForm(!showMaterialForm)} className="flex items-center gap-2 bg-yale-blue text-page-cream px-5 py-2.5 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all shrink-0">
           <Plus size={16} /> {showMaterialForm ? 'Cancel' : 'New Material'}
         </button>
+      </div>
+
+      {/* 🔍 Search Bar */}
+      <div className="relative">
+        <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-coffee-cream" />
+        <input 
+          type="text" 
+          value={searchQuery} 
+          onChange={(e) => setSearchQuery(e.target.value)} 
+          placeholder="Search materials by title or description..." 
+          className="w-full p-3 pl-10 bg-parchment border border-coffee-cream/20 rounded-sm focus:outline-none focus:border-maple-rust font-body text-sm placeholder:text-coffee-cream/50"
+        />
       </div>
 
       {showMaterialForm && (
@@ -705,17 +726,21 @@ export default function StudyMaterials() {
         </form>
       )}
 
-      {materials.length === 0 ? (
+      {filteredMaterials.length === 0 ? (
         <div className="text-center py-20 bg-parchment/50 rounded-sm border border-coffee-cream/20">
           <BookOpen size={64} className="mx-auto mb-4 text-coffee-cream/30" />
-          <p className="font-body text-coffee-cream italic mb-4">No study materials yet.</p>
-          <button onClick={() => setShowMaterialForm(true)} className="inline-flex items-center gap-2 bg-yale-blue text-page-cream px-6 py-3 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all">
-            <Plus size={16} /> Create Your First Material
-          </button>
+          <p className="font-body text-coffee-cream italic mb-4">
+            {searchQuery ? 'No materials match your search.' : 'No study materials yet.'}
+          </p>
+          {!searchQuery && (
+            <button onClick={() => setShowMaterialForm(true)} className="inline-flex items-center gap-2 bg-yale-blue text-page-cream px-6 py-3 rounded-sm font-label text-xs uppercase tracking-wider hover:bg-maple-rust transition-all">
+              <Plus size={16} /> Create Your First Material
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {materials.map((material, idx) => (
+          {filteredMaterials.map((material, idx) => (
             <div key={material.id} onClick={() => navigate(`/study-materials/${material.id}`)} className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy hover:border-maple-rust/50 transition-all cursor-pointer group animate-fade-in-up" style={{ animationDelay: `${idx * 0.05}s` }}>
               <div className="flex items-start justify-between mb-3">
                 <div className="p-3 bg-yale-blue/10 rounded-sm">

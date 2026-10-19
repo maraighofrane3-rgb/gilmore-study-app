@@ -74,7 +74,7 @@ export default function ChapterDetail() {
     const c = chapter.content || '';
     if (c.includes('<img') || c.includes('pdf-pages') || c.includes('pdf-divider')) return '';
     return c.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-    };
+  };
 
   const splitByPages = (content) => {
     const patterns = [
@@ -766,14 +766,25 @@ export default function ChapterDetail() {
         </div>
       )}
 
+      {/* 📷 Scanned Notes (Cleaned up) */}
       {scans.length > 0 && (
         <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="font-display text-lg text-yale-blue flex items-center gap-2">
               <ImageIcon size={18} className="text-maple-rust" /> Scanned Notes ({scans.length})
             </h4>
+            <button
+              onClick={() => setAnalysisSource('scans')}
+              className={`px-3 py-1.5 rounded-sm font-label text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+                analysisSource === 'scans' ? 'bg-maple-rust text-page-cream' : 'bg-page-cream border border-coffee-cream/20 text-coffee-cream hover:text-maple-rust'
+              }`}
+            >
+              <Sparkles size={12} /> Use for AI Analysis
+            </button>
           </div>
-          <p className="font-body text-xs text-coffee-cream italic">Select "Scanned Notes" in the AI Assistant below to analyze these images.</p>
+          <p className="font-body text-xs text-coffee-cream italic">
+            Select "Scanned Notes" in the AI Assistant below to analyze these images.
+          </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {scans.map((s, idx) => (
               <div key={s.id} className="relative group rounded-sm overflow-hidden border border-coffee-cream/20 bg-page-cream">

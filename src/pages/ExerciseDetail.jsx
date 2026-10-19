@@ -23,7 +23,7 @@ export default function ExerciseDetail() {
   const [uploadingPDF, setUploadingPDF] = useState(false);
   const fileInputRef = useRef(null);
 
-  // 📷 Scanned paper notes state
+  //  Scanned paper notes state
   const [scans, setScans] = useState([]);
   const [uploadingScans, setUploadingScans] = useState(false);
   const scanInputRef = useRef(null);
@@ -213,7 +213,7 @@ export default function ExerciseDetail() {
       try {
         extractedText = await extractTextFromPDF(file);
       } catch (textErr) {
-        console.warn('⚠️ Standard extraction failed (scanned PDF?):', textErr.message);
+        console.warn('️ Standard extraction failed (scanned PDF?):', textErr.message);
         extractedText = '';
       }
 
@@ -444,7 +444,7 @@ export default function ExerciseDetail() {
     const t = Math.max(f, parseInt(toPage, 10) || f);
     const hasRangeLocal = fromPage !== '' || toPage !== '';
 
-    // 🎯 EXPLICIT SOURCE SELECTION
+    //  EXPLICIT SOURCE SELECTION
     if (analysisSource === 'scans') {
       if (scans.length === 0) {
         showNotification('No scanned notes available. Please upload scans first.', 'error');
@@ -509,7 +509,7 @@ export default function ExerciseDetail() {
         setChapterResult(Array.isArray(cachedResult) ? cachedResult.join('\n') : cachedResult);
         setCacheHit(true);
         setAnalyzing(false);
-        showNotification(`Loaded from cache! (Instant ⚡)`);
+        showNotification(`Loaded from cache! (Instant )`);
         return;
       }
 
@@ -775,12 +775,21 @@ export default function ExerciseDetail() {
         </div>
       )}
 
+      {/* 📷 Scanned Notes (Cleaned up) */}
       {scans.length > 0 && (
         <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="font-display text-lg text-yale-blue flex items-center gap-2">
               <ImageIcon size={18} className="text-maple-rust" /> Scanned Notes ({scans.length})
             </h4>
+            <button
+              onClick={() => setAnalysisSource('scans')}
+              className={`px-3 py-1.5 rounded-sm font-label text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+                analysisSource === 'scans' ? 'bg-maple-rust text-page-cream' : 'bg-page-cream border border-coffee-cream/20 text-coffee-cream hover:text-maple-rust'
+              }`}
+            >
+              <Sparkles size={12} /> Use for AI Analysis
+            </button>
           </div>
           <p className="font-body text-xs text-coffee-cream italic">Select "Scanned Notes" in the AI Assistant below to analyze these images.</p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -901,7 +910,7 @@ export default function ExerciseDetail() {
             <h3 className="font-display text-lg text-yale-blue">Ask questions about this exercise</h3>
           </div>
           <span className="font-label text-[0.65rem] uppercase tracking-wider text-coffee-cream bg-page-cream border border-coffee-cream/20 px-2 py-1 rounded-sm">
-            {analysisSource === 'scans' ? '📷 Scanned Notes' : (chatHasRange ? `📖 Pages ${chatRangeFrom}–${chatRangeTo}` : '📖 Whole exercise')}
+            {analysisSource === 'scans' ? '📷 Scanned Notes' : (chatHasRange ? `📖 Pages ${chatRangeFrom}–${chatRangeTo}` : ' Whole exercise')}
           </span>
         </div>
 
