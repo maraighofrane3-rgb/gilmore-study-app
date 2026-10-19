@@ -60,6 +60,9 @@ export default function ExerciseDetail() {
   const [chatToPage, setChatToPage] = useState('');
   const [isAsking, setIsAsking] = useState(false);
   const [chatRetryMessage, setChatRetryMessage] = useState('');
+  const [scanThumbUrls, setScanThumbUrls] = useState({});
+  const thumbCacheRef = useRef({});
+
   const chatEndRef = useRef(null);
 
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
@@ -172,6 +175,32 @@ export default function ExerciseDetail() {
       }));
     }
   }, [chapter, materialId, chapterId]);
+
+    useEffect(() => {
+    let cancelled = false;
+    const buildThumbs = async () => {
+      const map = {};
+      for (const s of scans) {
+        if (thumbCacheRef.current[s.id]) continue;
+        try {
+          const { data, error } = await supabase.storage.from('scan-notes').download(s.file_path);
+          if (error || !data) { thumbCacheRef.current[s.id] = 'fallback'; continue; }
+          const normalized = await normalizeToJpegBlob(data, s.file_path);
+          const url = URL.createObjectURL(normalized);
+          thumbCacheRef.current[s.id] = url;
+          map[s.id] = url;
+        } catch (e) {
+          console.warn('Thumbnail prep failed for scan', s.id, e);
+          thumbCacheRef.current[s.id] = 'fallback';
+        }
+      }
+      if (!cancelled && Object.keys(map).length) {
+        setScanThumbUrls(prev => ({ ...prev, ...map }));
+      }
+    };
+    if (scans.length) buildThumbs();
+    return () => { cancelled = true; };
+  }, [scans]);
 
   // ============================================
   // 🔧 HANDLERS
@@ -874,7 +903,7 @@ export default function ExerciseDetail() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {scans.map((s, idx) => (
               <div key={s.id} className="relative group rounded-sm overflow-hidden border border-coffee-cream/20 bg-page-cream">
-                <img src={s.public_url} alt={`Scan ${idx + 1}`} className="w-full h-40 object-cover" />
+                <img src={scanThumbUrls[s.id] || s.public_url} alt={`Scan ${idx + 1}`} loading="lazy" className="w-full h-40 object-cover bg-coffee-cream/10" />
                 <div className="absolute inset-0 bg-yale-blue/70 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                   <span className="font-label text-[0.6rem] uppercase tracking-wider text-page-cream">#{idx + 1}</span>
                   <button onClick={() => deleteScan(s)} className="text-page-cream hover:text-maple-rust"><Trash2 size={14} /></button>
