@@ -10,6 +10,7 @@ import {
   MessageCircle, Send, Trash2, Pencil, Plus, StickyNote, HelpCircle, Zap,
   Image as ImageIcon
 } from 'lucide-react';
+import heic2any from 'heic2any';
 
 export default function ExerciseDetail() {
   const { materialId, chapterId } = useParams();
@@ -277,78 +278,105 @@ export default function ExerciseDetail() {
   };
 
   // ✅ MOBILE FIX: Uses createImageBitmap to automatically fix EXIF rotation on mobile!
-  const convertToJpeg = async (file) => {
-    return new Promise(async (resolve, reject) => {
-      try {
-        // createImageBitmap natively handles EXIF orientation on mobile!
-        const bitmap = await createImageBitmap(file);
-        const canvas = document.createElement('canvas');
-        const maxSize = 1400; // Good balance for AI vision
-        const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
-        
-        canvas.width = Math.round(bitmap.width * scale);
-        canvas.height = Math.round(bitmap.height * scale);
-        
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-        
-        bitmap.close(); // Prevent memory leaks on mobile
-        
-        canvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error('Failed to convert to JPEG'));
-        }, 'image/jpeg', 0.85); // Increased quality for AI OCR readability
-      } catch (err) {
-        console.error('Bitmap conversion error:', err);
-        reject(err);
-      }
-    });
+   // ============================================
+  // 🖼️ IMAGE PIPELINE (HEIC-safe, EXIF-safe, mobile-safe)
+  // ============================================
+
+  const looksHeic = (type = '', name = '') => {
+    const t = String(type).toLowerCase();
+    const n = String(name).toLowerCase();
+    return t.includes('heic') || t.includes('heif') || n.endsWith('.heic') || n.endsWith('.heif');
   };
 
-  // ✅ MOBILE FIX: Uses fetch + createImageBitmap to avoid CORS tainting and fix rotation
-  const scanToJpegBase64 = async (url) => {
+  // HEIC/HEIF → JPEG, even when the browser itself cannot decode HEIC
+  const normalizeToJpegBlob = async (blob, name = '') => {
+    if (!looksHeic(blob.type, name)) return blob;
     try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const bitmap = await createImageBitmap(blob);
-      
-      const canvas = document.createElement('canvas');
-      const max = 1400;
-      const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
-      canvas.width = Math.round(bitmap.width * scale);
-      canvas.height = Math.round(bitmap.height * scale);
-      
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      
-      bitmap.close();
-      
-      return new Promise((resolve, reject) => {
-        canvas.toBlob((b) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result.split(',')[1]);
-          reader.onerror = reject;
-          reader.readAsDataURL(b);
-        }, 'image/jpeg', 0.85);
-      });
-    } catch (err) {
-      console.error('scanToJpegBase64 error:', err);
-      throw new Error('Failed to process image for AI.');
+      const result = await heic2any({ blob, toType: 'image/jpeg', quality: 0.9 });
+      return Array.isArray(result) ? result[0] : result;
+    } catch (e) {
+      console.error('HEIC conversion failed:', e);
+      throw new Error('This HEIC photo could not be converted. Switch your camera to JPEG / "Most compatible" and retake it.');
     }
   };
 
-  const loadScanImages = async (list) => {
-    try {
-      const out = [];
-      for (let i = 0; i < list.length; i++) {
-        out.push({ base64: await scanToJpegBase64(list[i].public_url), pageNum: i + 1 });
+  // Decode bytes → drawable source, honoring phone EXIF rotation
+  const decodeImage = async (blob) => {
+    if (typeof createImageBitmap === 'function') {
+      try { return await createImageBitmap(blob, { imageOrientation: 'from-image' }); }
+      catch (e) {
+        try { return await createImageBitmap(blob); } catch (e2) { /* fall through */ }
       }
-      return out;
-    } catch (e) { console.warn('Scan load failed:', e); return null; }
+    }
+    const url = URL.createObjectURL(blob);
+    try {
+      return await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error('Your browser could not decode this image format.'));
+        i.src = url;
+      });
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    }
+  };
+
+  // Draw → right-side-up, resized JPEG blob
+  const drawToJpegBlob = async (blob, maxSize = 1600, quality = 0.85) => {
+    const src = await decodeImage(blob);
+    const w = src.width || src.naturalWidth;
+    const h = src.height || src.naturalHeight;
+    if (!w || !h) throw new Error('Image has no dimensions.');
+    const scale = Math.min(1, maxSize / Math.max(w, h));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+    if (src.close) src.close();
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('JPEG encoding failed on this device.'))), 'image/jpeg', quality);
+    });
+  };
+
+  const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1]);
+    r.onerror = () => reject(new Error('Could not encode image for the AI.'));
+    r.readAsDataURL(blob);
+  });
+
+  const convertToJpeg = async (file) => {
+    const normalized = await normalizeToJpegBlob(file, file.name);
+    return drawToJpegBlob(normalized, 1600, 0.85);
+  };
+
+  // Analysis-side: pull bytes via Supabase (no CORS taint), normalize HEIC, resize
+  const loadScanImages = async (list) => {
+    const out = [];
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      let blob = null;
+      try {
+        const { data, error } = await supabase.storage.from('scan-notes').download(s.file_path);
+        if (!error && data) blob = data;
+      } catch (e) { console.warn('storage.download failed:', e); }
+      if (!blob) {
+        try {
+          const res = await fetch(s.public_url);
+          if (res.ok) blob = await res.blob();
+        } catch (e) { console.warn('public fetch failed:', e); }
+      }
+      if (!blob) { console.warn('Could not load scan', s.id); continue; }
+      try {
+        const normalized = await normalizeToJpegBlob(blob, s.file_path || s.public_url);
+        const jpeg = await drawToJpegBlob(normalized, 1280, 0.8);
+        out.push({ base64: await blobToBase64(jpeg), pageNum: i + 1 });
+      } catch (e) { console.warn('Decode failed for scan', s.id, e); }
+    }
+    return out.length ? out : null;
   };
 
   const handleScanUpload = async (e) => {
@@ -358,41 +386,35 @@ export default function ExerciseDetail() {
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        
         const jpegBlob = await convertToJpeg(file);
-        const ext = 'jpg'; 
-        const path = `${user.id}/scans/${Date.now()}-${i}.${ext}`;
-        
+        const path = `${user.id}/scans/${Date.now()}-${i}.jpg`;
+
         const { error: upErr } = await supabase.storage
           .from('scan-notes')
-          .upload(path, jpegBlob, {
-            cacheControl: '3600',
-            contentType: 'image/jpeg'
-          });
-        
-        if (upErr) throw upErr;
-        
-        const { data: { publicUrl } } = supabase.storage
-          .from('scan-notes')
-          .getPublicUrl(path);
-        
-        await supabase.from('doc_scans').insert([{
+          .upload(path, jpegBlob, { cacheControl: '3600', contentType: 'image/jpeg' });
+        if (upErr) throw new Error(upErr.message || 'Storage upload failed');
+
+        const { data: { publicUrl } } = supabase.storage.from('scan-notes').getPublicUrl(path);
+
+        const { error: dbErr } = await supabase.from('doc_scans').insert([{
           user_id: user.id,
           doc_id: chapterId,
           file_path: path,
           public_url: publicUrl,
           position: scans.length + i,
         }]);
+        if (dbErr) throw new Error(dbErr.message || 'Database insert failed');
       }
       const { data } = await supabase.from('doc_scans').select('*').eq('doc_id', chapterId).order('position');
       setScans(data || []);
-      showNotification(`${files.length} scan${files.length > 1 ? 's' : ''} added — the AI can read them now!`);
+      setAnalysisSource('scans'); // 🎯 AI reads the photos by default now
+      showNotification(`${files.length} scan${files.length > 1 ? 's' : ''} added — AI source switched to Scanned Notes!`);
     } catch (err) {
       console.error('Scan upload error:', err);
-      showNotification(`Failed to upload scans: ${err.message}`, 'error');
+      showNotification(`Failed to upload scans: ${err?.message || 'Unknown error (see console)'}`, 'error');
     }
     setUploadingScans(false);
-    e.target.value = '';
+    if (e.target) e.target.value = '';
   };
 
   const deleteScan = async (scan) => {
