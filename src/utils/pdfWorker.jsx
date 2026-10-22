@@ -1,4 +1,4 @@
-// 📡 pdf.js loads at runtime from Mozilla's CDN — 0 bytes in your build
+//  pdf.js loads at runtime from Mozilla's CDN — 0 bytes in your build
 const PDFJS_VERSION = '4.8.69'; // 👈 match the major version in your package.json
 
 let pdfjsPromise = null;
@@ -15,6 +15,27 @@ function loadPdfjs() {
   }
   return pdfjsPromise;
 }
+
+// 🛡️ Postgres text columns forbid NUL (U+0000); PDF extraction also
+// emits lone UTF-16 surrogates. Strip both before returning text.
+const pgSafe = (s) => {
+  if (s == null) return '';
+  const t = String(s).replace(/\u0000/g, '');          // the 22P05 culprit
+  let out = '';
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF) {                  // high surrogate
+      const n = t.charCodeAt(i + 1);
+      if (n >= 0xDC00 && n <= 0xDFFF) { out += t[i] + t[i + 1]; i++; } // valid pair -> keep
+      // lone high -> drop
+    } else if (c >= 0xDC00 && c <= 0xDFFF) {
+      // lone low -> drop
+    } else {
+      out += t[i];
+    }
+  }
+  return out;
+};
 
 export const extractTextFromPDF = async (file) => {
   try {
@@ -53,7 +74,8 @@ export const extractTextFromPDF = async (file) => {
       throw new Error('No text could be extracted from this PDF. It may be a scanned document or image-based PDF. Try using the image rendering function instead.');
     }
 
-    return trimmedText;
+    // 🛡️ Sanitize before returning to prevent Postgres Unicode errors
+    return pgSafe(trimmedText);
   } catch (error) {
     console.error('PDF extraction error:', error);
     throw error;
