@@ -16,12 +16,75 @@ import {
   BarChart3,
   History as HistoryIcon,
   Map, // utilisé pour le bouton Guide
+  Download, // 📱 PWA install
+  X,        // 📱 PWA install
 } from 'lucide-react';
 import AutumnLeaves from './AutumnLeaves';
 import OnboardingTour from './OnboardingTour';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useInstallPrompt } from '../hooks/useInstallPrompt';
 
+// ============================================
+// 📱 PWA INSTALL BUTTON (Android / Chrome)
+// ============================================
+function InstallPwaButton() {
+  const { canInstall, install } = useInstallPrompt();
+
+  if (!canInstall) return null;
+
+  return (
+    <button
+      onClick={install}
+      className="fixed bottom-24 right-6 z-50 flex items-center gap-2 bg-maple-rust text-page-cream px-5 py-3 rounded-sm shadow-cozy font-label text-xs uppercase tracking-wider hover:bg-yale-blue transition-all animate-fade-in-up"
+      title="Install as app"
+    >
+      <Download size={16} />
+      Install App
+    </button>
+  );
+}
+
+// ============================================
+// 📱 iOS INSTALL HINT (Safari / iPhone)
+// ============================================
+function IosInstallHint() {
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isStandalone = window.navigator.standalone === true;
+    const dismissed = localStorage.getItem('ios-install-dismissed');
+
+    if (isIos && !isStandalone && !dismissed) {
+      setShow(true);
+    }
+  }, []);
+
+  if (!show) return null;
+
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-parchment border border-coffee-cream/30 text-library-ink px-5 py-3 rounded-sm shadow-cozy flex items-center gap-3 max-w-xs animate-fade-in-up">
+      <div className="flex-1 text-xs font-body leading-relaxed">
+        Tap the <strong>Share</strong> button, then{' '}
+        <strong>"Add to Home Screen"</strong> to install as an app.
+      </div>
+      <button
+        onClick={() => {
+          setShow(false);
+          localStorage.setItem('ios-install-dismissed', '1');
+        }}
+        className="text-coffee-cream hover:text-maple-rust"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
+
+// ============================================
+// MAIN LAYOUT
+// ============================================
 export default function Layout() {
   const location = useLocation();
   const { user } = useAuth(); // ✅ Récupération de l'utilisateur
@@ -72,7 +135,7 @@ export default function Layout() {
       <nav className="relative z-50 flex flex-col bg-sidebar-bg text-sidebar-text md:w-72 md:h-screen md:fixed md:left-0 md:top-0 bottom-0 w-full border-t md:border-t-0 md:border-r border-sidebar-text/15">
         <div className="p-8 hidden md:block shrink-0">
           <h1 className="font-display text-3xl font-bold leading-tight text-sidebar-accent">
-            Rory Gilmore's <span className="italic text-sidebar-text">World</span>
+            Gilmore <span className="italic text-sidebar-text">Academia</span>
           </h1>
           <p className="font-label text-xs uppercase tracking-wider-label text-sidebar-muted mt-3">
             Stars Hollow, Connecticut
@@ -159,6 +222,10 @@ export default function Layout() {
 
       {/* ✅ Le tour s'affiche par-dessus tout quand showTour est vrai */}
       {showTour && <OnboardingTour onClose={() => setShowTour(false)} />}
+
+      {/* 📱 PWA install helpers */}
+      <InstallPwaButton />
+      <IosInstallHint />
     </div>
   );
 }

@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'favicon1.png', 'favicon2.png', 'favicon3.png'],
       manifest: {
-        name: "Rory's World",
-        short_name: 'RorysWorld',
+        name: "GilmoreAcademia",
+        short_name: 'GilmoreAcademia',
         description: 'Your personal sanctuary for focused study and intellectual growth.',
         theme_color: '#132A44',
         background_color: '#F3EAD8',
