@@ -59,9 +59,9 @@ export default function ChapterDetail() {
   const [chatToPage, setChatToPage] = useState('');
   const [isAsking, setIsAsking] = useState(false);
   const [chatRetryMessage, setChatRetryMessage] = useState('');
+  
   const [scanThumbUrls, setScanThumbUrls] = useState({});
   const thumbCacheRef = useRef({});
-
   const chatEndRef = useRef(null);
 
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
@@ -175,8 +175,7 @@ export default function ChapterDetail() {
     }
   }, [chapter, materialId, chapterId]);
 
-
-    useEffect(() => {
+  useEffect(() => {
     let cancelled = false;
     const buildThumbs = async () => {
       const map = {};
@@ -201,6 +200,7 @@ export default function ChapterDetail() {
     if (scans.length) buildThumbs();
     return () => { cancelled = true; };
   }, [scans]);
+
   // ============================================
   // 🔧 HANDLERS
   // ============================================
@@ -298,8 +298,7 @@ export default function ChapterDetail() {
     e.target.value = '';
   };
 
-  // ✅ MOBILE-FRIENDLY: Convert any image to JPEG (fixes mobile HEIC/memory issues)
-   // ============================================
+  // ============================================
   // 🖼️ IMAGE PIPELINE (HEIC-safe, EXIF-safe, mobile-safe)
   // ============================================
 
@@ -309,7 +308,6 @@ export default function ChapterDetail() {
     return t.includes('heic') || t.includes('heif') || n.endsWith('.heic') || n.endsWith('.heif');
   };
 
-  // HEIC/HEIF → JPEG, even when the browser itself cannot decode HEIC
   const normalizeToJpegBlob = async (blob, name = '') => {
     if (!looksHeic(blob.type, name)) return blob;
     try {
@@ -321,7 +319,6 @@ export default function ChapterDetail() {
     }
   };
 
-  // Decode bytes → drawable source, honoring phone EXIF rotation
   const decodeImage = async (blob) => {
     if (typeof createImageBitmap === 'function') {
       try { return await createImageBitmap(blob, { imageOrientation: 'from-image' }); }
@@ -342,7 +339,6 @@ export default function ChapterDetail() {
     }
   };
 
-  // Draw → right-side-up, resized JPEG blob
   const drawToJpegBlob = async (blob, maxSize = 1600, quality = 0.85) => {
     const src = await decodeImage(blob);
     const w = src.width || src.naturalWidth;
@@ -374,7 +370,6 @@ export default function ChapterDetail() {
     return drawToJpegBlob(normalized, 1600, 0.85);
   };
 
-  // Analysis-side: pull bytes via Supabase (no CORS taint), normalize HEIC, resize
   const loadScanImages = async (list) => {
     const out = [];
     for (let i = 0; i < list.length; i++) {
@@ -428,7 +423,7 @@ export default function ChapterDetail() {
       }
       const { data } = await supabase.from('doc_scans').select('*').eq('doc_id', chapterId).order('position');
       setScans(data || []);
-      setAnalysisSource('scans'); // 🎯 AI reads the photos by default now
+      setAnalysisSource('scans'); 
       showNotification(`${files.length} scan${files.length > 1 ? 's' : ''} added — AI source switched to Scanned Notes!`);
     } catch (err) {
       console.error('Scan upload error:', err);
@@ -618,15 +613,41 @@ export default function ChapterDetail() {
       let systemPrompt = '';
       let charLimit = 5000;
 
+      // 🚨 ENHANCED PROMPTS TO PREVENT REPETITION
       if (action === 'summarize') {
-        systemPrompt = `Provide a concise, clear summary of ${scope} from "${chapter.title}". Focus on the main ideas and key takeaways in 2-3 paragraphs.`;
+        systemPrompt = `Provide a concise, clear, and NON-REPETITIVE summary of ${scope} from "${chapter.title}". Focus on the main ideas and key takeaways in 2-3 distinct paragraphs. Do not repeat the same points or use filler text.`;
       } else if (action === 'explain') {
-        systemPrompt = `Explain ${scope} from "${chapter.title}" in simple, clear terms. Break down any complex concepts or jargon.`;
+        systemPrompt = `Explain ${scope} from "${chapter.title}" in simple, clear terms. Break down complex concepts or jargon step by step. Ensure each paragraph introduces new information without repeating previous explanations.`;
       } else if (action === 'keypoints') {
-        systemPrompt = `Extract the 5-7 most important key points from ${scope} of "${chapter.title}". Present them as a bulleted list.`;
+        systemPrompt = `Extract the 5-7 most important UNIQUE key points from ${scope} of "${chapter.title}". Present them as a bulleted list. CRITICAL: Ensure each point covers a completely distinct idea without overlapping or repeating concepts.`;
         charLimit = 4000;
-      } else if (action === 'quiz') {
-        systemPrompt = `Create a multiple-choice quiz (QCM) of 5 questions about ${scope} of "${chapter.title}". Format it EXACTLY like this:\n\n1. Question text\nA) option\nB) option\nC) option\nD) option\n\n(after the 5 questions, add a line "Answers:" then list the correct letters, e.g. 1-B, 2-A, 3-C, 4-D, 5-A). Keep questions clear and focused on the key ideas.`;
+            } else if (action === 'quiz') {
+        systemPrompt = `Create a multiple-choice quiz (QCM) of exactly 10 UNIQUE questions about ${scope} of "${chapter.title}".
+
+CRITICAL FORMATTING RULES:
+1. Number the questions sequentially: 1., 2., 3., 4., 5. (Do NOT repeat "1." for every question).
+2. Make the question text **bold** by wrapping it in double asterisks (e.g., **1. Question text...**).
+3. Ensure options A, B, C, D are distinct and plausible.
+4. Each question must test a completely different concept.
+
+Format it EXACTLY like this:
+
+**1. First question text here?**
+A) option
+B) option
+C) option
+D) option
+
+**2. Second question text here?**
+A) option
+B) option
+C) option
+D) option
+
+... (continue for 10 questions)
+
+Answers:
+1-B, 2-A, 3-C, 4-D, 5-A`;
         charLimit = 4000;
       }
 
@@ -753,7 +774,7 @@ export default function ChapterDetail() {
       setTimeout(() => {
         notesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         setJustSaved(false);
-        setChapterResult('');
+        setChapterResult(''); // Prevents double-saving
         setNoteTitle('');
         setActiveAction(null);
         setCacheHit(false);
@@ -877,7 +898,7 @@ export default function ChapterDetail() {
         </div>
       )}
 
-      {/* 📷 UPLOADED PHOTOS (Scan button removed) */}
+      {/* 📷 UPLOADED PHOTOS */}
       {scans.length > 0 && (
         <div className="bg-parchment p-6 rounded-sm border border-coffee-cream/20 shadow-cozy space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">

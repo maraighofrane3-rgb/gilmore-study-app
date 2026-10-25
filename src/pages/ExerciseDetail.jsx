@@ -176,7 +176,7 @@ export default function ExerciseDetail() {
     }
   }, [chapter, materialId, chapterId]);
 
-    useEffect(() => {
+  useEffect(() => {
     let cancelled = false;
     const buildThumbs = async () => {
       const map = {};
@@ -306,8 +306,7 @@ export default function ExerciseDetail() {
     e.target.value = '';
   };
 
-  // ✅ MOBILE FIX: Uses createImageBitmap to automatically fix EXIF rotation on mobile!
-   // ============================================
+  // ============================================
   // 🖼️ IMAGE PIPELINE (HEIC-safe, EXIF-safe, mobile-safe)
   // ============================================
 
@@ -317,7 +316,6 @@ export default function ExerciseDetail() {
     return t.includes('heic') || t.includes('heif') || n.endsWith('.heic') || n.endsWith('.heif');
   };
 
-  // HEIC/HEIF → JPEG, even when the browser itself cannot decode HEIC
   const normalizeToJpegBlob = async (blob, name = '') => {
     if (!looksHeic(blob.type, name)) return blob;
     try {
@@ -329,7 +327,6 @@ export default function ExerciseDetail() {
     }
   };
 
-  // Decode bytes → drawable source, honoring phone EXIF rotation
   const decodeImage = async (blob) => {
     if (typeof createImageBitmap === 'function') {
       try { return await createImageBitmap(blob, { imageOrientation: 'from-image' }); }
@@ -350,7 +347,6 @@ export default function ExerciseDetail() {
     }
   };
 
-  // Draw → right-side-up, resized JPEG blob
   const drawToJpegBlob = async (blob, maxSize = 1600, quality = 0.85) => {
     const src = await decodeImage(blob);
     const w = src.width || src.naturalWidth;
@@ -382,7 +378,6 @@ export default function ExerciseDetail() {
     return drawToJpegBlob(normalized, 1600, 0.85);
   };
 
-  // Analysis-side: pull bytes via Supabase (no CORS taint), normalize HEIC, resize
   const loadScanImages = async (list) => {
     const out = [];
     for (let i = 0; i < list.length; i++) {
@@ -436,7 +431,7 @@ export default function ExerciseDetail() {
       }
       const { data } = await supabase.from('doc_scans').select('*').eq('doc_id', chapterId).order('position');
       setScans(data || []);
-      setAnalysisSource('scans'); // 🎯 AI reads the photos by default now
+      setAnalysisSource('scans'); 
       showNotification(`${files.length} scan${files.length > 1 ? 's' : ''} added — AI source switched to Scanned Notes!`);
     } catch (err) {
       console.error('Scan upload error:', err);
@@ -634,7 +629,32 @@ export default function ExerciseDetail() {
         systemPrompt = `Extract the 5-7 most important key points from ${scope} of "${chapter.title}". Present them as a bulleted list.`;
         charLimit = 4000;
       } else if (action === 'quiz') {
-        systemPrompt = `Create a multiple-choice quiz (QCM) of 5 questions about ${scope} of "${chapter.title}". Format it EXACTLY like this:\n\n1. Question text\nA) option\nB) option\nC) option\nD) option\n\n(after the 5 questions, add a line "Answers:" then list the correct letters, e.g. 1-B, 2-A, 3-C, 4-D, 5-A). Keep questions clear and focused on the key ideas.`;
+        systemPrompt = `Create a multiple-choice quiz (QCM) of exactly 5 UNIQUE questions about ${scope} of "${chapter.title}".
+
+CRITICAL FORMATTING RULES:
+1. Number the questions sequentially: 1., 2., 3., 4., 5. (Do NOT repeat "1." for every question).
+2. Make the question text **bold** by wrapping it in double asterisks (e.g., **1. Question text...**).
+3. Ensure options A, B, C, D are distinct and plausible.
+4. Each question must test a completely different concept.
+
+Format it EXACTLY like this:
+
+**1. First question text here?**
+A) option
+B) option
+C) option
+D) option
+
+**2. Second question text here?**
+A) option
+B) option
+C) option
+D) option
+
+... (continue for 5 questions)
+
+Answers:
+1-B, 2-A, 3-C, 4-D, 5-A`;
         charLimit = 4000;
       }
 
