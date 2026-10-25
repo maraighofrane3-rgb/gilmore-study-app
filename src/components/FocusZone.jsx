@@ -127,7 +127,7 @@ export default function FocusZone() {
         height: '1',
         width: '1',
         playerVars: {
-          autoplay: 1,
+          autoplay: 0, // 🚨 Changed to 0 to prevent auto-play on load
           controls: 0,
           disablekb: 1,
           fs: 0,
@@ -136,7 +136,7 @@ export default function FocusZone() {
           rel: 0,
           loop: 1,
           enablejsapi: 1,
-          origin: window.location.origin, // ✅ tells the widget API the real parent origin (kills localhost mismatch)
+          origin: window.location.origin, // ✅ tells the widget API the real parent origin
         },
         events: {
           onReady: (event) => {
@@ -146,10 +146,10 @@ export default function FocusZone() {
             try {
               t.setVolume(mutedRef.current ? 0 : volumeRef.current);
               if (mutedRef.current) t.mute();
-              t.playVideo();
+              // 🚨 REMOVED: t.playVideo() — now it waits for the user to click Play
             } catch {}
             setIsLoading(false);
-            setIsPlaying(true);
+            setIsPlaying(false); // 🚨 Start in paused state
           },
           onStateChange: (event) => {
             // ✅ ignore events from a player we already replaced/destroyed
@@ -244,8 +244,13 @@ export default function FocusZone() {
   };
 
   const togglePlay = () => cmd((p) => {
-    if (isPlaying) { p.pauseVideo(); setIsPlaying(false); }
-    else { p.playVideo(); setIsPlaying(true); }
+    if (isPlaying) { 
+      p.pauseVideo(); 
+      setIsPlaying(false); 
+    } else { 
+      p.playVideo(); 
+      setIsPlaying(true); 
+    }
   });
 
   const handleVolumeChange = (e) => {
